@@ -1,8 +1,20 @@
 import { create } from 'zustand';
 import { firebaseApp } from 'app';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, onSnapshot, query, orderBy, Timestamp, arrayUnion, arrayRemove, where } from 'firebase/firestore';
+import {
+  getFirestore,
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  orderBy,
+  arrayUnion,
+  arrayRemove,
+} from 'firebase/firestore';
 import { ActivityCategory } from '../pages/Feed';
-import { User } from 'firebase/auth';
 import { useChatStore } from './chatStore';
 
 // Initialize Firestore
@@ -14,6 +26,8 @@ export interface Activity {
   title: string;
   description: string;
   location: string;
+  latitude: number;
+  longitude: number;
   dateTime: string;
   category: ActivityCategory;
   createdBy: {
@@ -26,71 +40,46 @@ export interface Activity {
   isPublic: boolean;
 }
 
-
-
-// Export the ActivityCategory from here too to ensure consistency
-export type ActivityCategory = 
-  | "Sports"
-  | "Dining"
-  | "Hiking"
-  | "Gaming"
-  | "Movies"
-  | "Travel"
-  | "Music"
-  | "Cooking"
-  | "All";
+// Define input type for creating activities
+export type NewActivity = Omit<
+  Activity,
+  'id' | 'participantIds' | 'createdAt'
+>;
 
 // Define store state
 interface ActivityState {
   activities: Activity[];
   isLoading: boolean;
   error: Error | null;
-  // Function to initialize the listener for real-time updates
   initializeListener: (userId?: string, showPrivate?: boolean) => () => void;
-  // Function to create a new activity
-  createActivity: (activity: Omit<Activity, 'id' | 'participantIds' | 'participantsCount' | 'createdAt'>) => Promise<string>;
-  // Function to join an activity
+  createActivity: (activity: NewActivity) => Promise<string>;
   joinActivity: (activityId: string, userId: string) => Promise<void>;
-  // Function to leave an activity
   leaveActivity: (activityId: string, userId: string) => Promise<void>;
-  // Function to delete an activity
   deleteActivity: (activityId: string, userId: string) => Promise<void>;
-  // Function to check if a user is a participant in an activity
   isParticipant: (activityId: string, userId: string) => boolean;
 }
 
-// Create store
 export const useActivityStore = create<ActivityState>((set, get) => ({
   activities: [],
   isLoading: false,
   error: null,
-  
-  // Initialize listener for real-time updates
+
   initializeListener: (userId = '', showFriendsOnly = false) => {
     set({ isLoading: true });
-    
-    // Set up query for activities collection
-    // If userId is provided, we'll filter for public activities and private activities from friends
-    let q;
-    
-    // We'll always load all activities and filter on the client side based on friendship
-    // This is because Firestore can't query based on array membership across documents
-    q = query(collection(db, 'activities'), orderBy('dateTime'));
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const activitiesData: Activity[] = [];
-      querySnapshot.forEach((doc) => {
-        try {
-          const data = doc.data();
-          if (!data) {
-            console.warn('Empty document data for ID:', doc.id);
-            return;
-          }
-          
+    const q = query(collection(db, 'activities'), orderBy('dateTime'));
+    const unsubscribe = onSnapshot(
+      q,
+      (querySnapshot) => {
+        const activitiesData: Activity[] = [];
+        querySnapshot.forEach((docSnap) => {
+          const data = docSnap.data() as any;
           activitiesData.push({
-            id: doc.id,
+            id: docSnap.id,
             title: data.title || '',
             description: data.description || '',
             location: data.location || '',
+            latitude: typeof data.latitude === 'number' ? data.latitude : 0,
+            longitude: typeof data.longitude === 'number' ? data.longitude : 0,
             dateTime: data.dateTime || '',
             category: data.category || 'All',
             createdBy: {
@@ -100,67 +89,53 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
             participantIds: data.participantIds || [],
             maxParticipants: data.maxParticipants,
             createdAt: data.createdAt || Date.now(),
-            isPublic: data.isPublic !== undefined ? data.isPublic : true, // Default to public for backward compatibility
+            isPublic: data.isPublic ?? true,
           });
-        } catch (error) {
-          console.error('Error processing document:', doc.id, error);
-        }
-      });
-      
-      // Sort by date (newest first for created activities)
-      activitiesData.sort((a, b) => {
-        return new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime();
-      });
-      
-      set({ 
-        activities: activitiesData, 
-        isLoading: false,
-      });
-    }, (error) => {
-      console.error('Error getting activities:', error);
-      set({ error, isLoading: false });
-    });
-    
+        });
+
+        activitiesData.sort(
+          (a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()
+        );
+        set({ activities: activitiesData, isLoading: false });
+      },
+      (error) => {
+        console.error('Error getting activities:', error);
+        set({ error, isLoading: false });
+      }
+    );
+
     return unsubscribe;
   },
-  
-  // Create a new activity
+
   createActivity: async (activity) => {
     try {
-      if (!activity || !activity.createdBy || !activity.createdBy.userId) {
-        console.error('Invalid activity data:', activity);
-        throw new Error('Invalid activity data');
+      const { title, description, location, latitude, longitude, dateTime, category, createdBy, maxParticipants, isPublic } =
+        activity;
+
+      if (!title || !description || !location || !dateTime || !category) {
+        throw new Error('Missing required fields for activity');
       }
 
       const activityRef = doc(collection(db, 'activities'));
-      
-      // Validate required fields
-      if (!activity.title || !activity.description || !activity.location || !activity.dateTime || !activity.category) {
-        throw new Error('Missing required fields for activity');
-      }
-      
-      // Format the data correctly for Firestore - removing imageUrl
       const newActivity = {
-        title: activity.title,
-        description: activity.description,
-        location: activity.location,
-        dateTime: activity.dateTime,
-        category: activity.category,
+        title,
+        description,
+        location,
+        latitude,
+        longitude,
+        dateTime,
+        category,
         createdBy: {
-          userId: activity.createdBy.userId,
-          displayName: activity.createdBy.displayName || 'Anonymous',
+          userId: createdBy.userId,
+          displayName: createdBy.displayName || 'Anonymous',
         },
-        participantIds: [activity.createdBy.userId], // Creator is automatically a participant
+        participantIds: [createdBy.userId],
         createdAt: Date.now(),
-        maxParticipants: activity.maxParticipants,
-        isPublic: activity.isPublic !== undefined ? activity.isPublic : true, // Default to public if not specified
+        maxParticipants,
+        isPublic: isPublic ?? true,
       };
-      
-      console.log('Creating activity with data:', JSON.stringify(newActivity));
-      
-      // Ensure we're using a valid Firestore document reference
+
       await setDoc(activityRef, newActivity);
-      console.log('Activity created with ID:', activityRef.id);
       return activityRef.id;
     } catch (error) {
       console.error('Error creating activity:', error);
