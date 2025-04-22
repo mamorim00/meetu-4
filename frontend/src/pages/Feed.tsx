@@ -39,17 +39,13 @@ export type ActivityCategory =
   | "Cooking";
 
 export default function Feed() {
-  // Primary filters
   const [searchQuery, setSearchQuery] = useState("");
   const [showFriendsOnly, setShowFriendsOnly] = useState(false);
-  const [showPrivateActivities, setShowPrivateActivities] = useState(true);
 
-  // Near‑me filters (always visible)
   const [cityQuery, setCityQuery] = useState("");
   const [center, setCenter] = useState<{ name: string; lat: number; lng: number } | null>(null);
   const [radiusKm, setRadiusKm] = useState<number>(10);
 
-  // “More Filters”
   const [timeFilter, setTimeFilter] = useState<"upcoming" | "archive">("upcoming");
   const [activeCategory, setActiveCategory] = useState<ActivityCategory>("All");
 
@@ -57,13 +53,11 @@ export default function Feed() {
   const { activities, isLoading, initializeListener } = useActivityStore();
   const { isFriend } = useFriendsStore();
 
-  // Real‑time listener
   useEffect(() => {
     const unsub = initializeListener(user.uid);
     return () => unsub();
   }, [initializeListener, user.uid]);
 
-  // Time filter
   const timeFiltered = useMemo(() => {
     const now = new Date();
     return activities.filter(act =>
@@ -73,9 +67,7 @@ export default function Feed() {
     );
   }, [activities, timeFilter]);
 
-  // Combined filters
   const filteredActivities = timeFiltered.filter(activity => {
-    // Search
     const q = searchQuery.toLowerCase();
     if (
       q &&
@@ -84,21 +76,17 @@ export default function Feed() {
       !activity.location.toLowerCase().includes(q)
     ) return false;
 
-    // Privacy & friends
     const isOwn = activity.createdBy.userId === user.uid;
     const isPublic = activity.isPublic !== false;
     const creatorIsFriend = isFriend(activity.createdBy.userId);
-    const showPriv = showPrivateActivities && !isPublic && creatorIsFriend;
-    if (!(isOwn || isPublic || showPriv)) return false;
+    if (!(isOwn || isPublic || creatorIsFriend)) return false;
     if (showFriendsOnly && !(isOwn || creatorIsFriend)) return false;
 
-    // Near‑me
     if (center) {
       const dist = getDistance(center.lat, center.lng, activity.latitude, activity.longitude);
       if (dist > radiusKm) return false;
     }
 
-    // Category
     if (activeCategory !== "All" && activity.category !== activeCategory) return false;
 
     return true;
@@ -107,27 +95,6 @@ export default function Feed() {
   return (
     <Layout title="Activity Feed">
       <div className="container mx-auto max-w-7xl px-6 pt-4 space-y-6">
-        
-        {/* Search & Toggles */}
-        <div className="flex flex-col sm:flex-row gap-4">
-          <Input
-            placeholder="Search activities..."
-            className="flex-1 rounded-full"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          <div className="flex items-center gap-2">
-            <Switch checked={showFriendsOnly} onCheckedChange={setShowFriendsOnly} id="friends-only" />
-            <Label htmlFor="friends-only" className="cursor-pointer">Friends only</Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch checked={showPrivateActivities} onCheckedChange={setShowPrivateActivities} id="include-private" />
-            <Label htmlFor="include-private" className="cursor-pointer">Include private</Label>
-          </div>
-          <Button variant="outline" onClick={() => setSearchQuery("")}>
-            Clear search
-          </Button>
-        </div>
 
         {/* Near‑Me Filter (always visible) */}
         <div className="flex flex-col sm:flex-row gap-4">
@@ -162,11 +129,28 @@ export default function Feed() {
         {/* More Filters Accordion */}
         <Accordion type="single" collapsible>
           <AccordionItem value="moreFilters">
-            <AccordionTrigger className="bg-muted/20 rounded-md px-4 py-2">
+            <AccordionTrigger className="bg-muted/20 rounded-t-md px-4 py-2">
               More Filters
             </AccordionTrigger>
             <AccordionContent className="space-y-6 p-4 bg-muted/10 rounded-b-md">
               
+              {/* Search & Friends Toggle */}
+              <div className="flex flex-col sm:flex-row gap-4">
+                <Input
+                  placeholder="Search activities..."
+                  className="flex-1 rounded-full"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                <div className="flex items-center gap-2">
+                  <Switch checked={showFriendsOnly} onCheckedChange={setShowFriendsOnly} id="friends-only" />
+                  <Label htmlFor="friends-only" className="cursor-pointer">Friends only</Label>
+                </div>
+                <Button variant="outline" onClick={() => setSearchQuery("")}>
+                  Clear search
+                </Button>
+              </div>
+
               {/* Time Tabs */}
               <Tabs
                 value={timeFilter}
