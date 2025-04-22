@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { firebaseApp } from 'app';
+import { firebaseApp } from 'app'; // Assuming 'app' exports your initialized firebaseApp
 import {
   getFirestore,
   collection,
@@ -13,14 +13,16 @@ import {
   orderBy,
   arrayUnion,
   arrayRemove,
+  Timestamp as FirestoreTimestamp // *** Import Firestore Timestamp ***
 } from 'firebase/firestore';
-import { ActivityCategory } from '../pages/Feed';
-import { useChatStore } from './chatStore';
+import { ActivityCategory } from '../pages/Feed'; // Ensure this path is correct
+import { useChatStore } from './chatStore'; // Ensure this path is correct
 
 // Initialize Firestore
 const db = getFirestore(firebaseApp);
 
 // Define activity interface with Firestore specifics
+// *** Add lastMessageTimestamp (optional) ***
 export interface Activity {
   id: string;
   title: string;
@@ -28,7 +30,8 @@ export interface Activity {
   location: string;
   latitude: number;
   longitude: number;
-  dateTime: string;
+  // Consider changing dateTime to Firestore Timestamp for consistency if possible
+  dateTime: string | FirestoreTimestamp; // Allow both for now if needed
   category: ActivityCategory;
   createdBy: {
     userId: string;
@@ -36,14 +39,16 @@ export interface Activity {
   };
   participantIds: string[];
   maxParticipants?: number;
-  createdAt: number;
+  createdAt: number; // JS Timestamp (milliseconds from Date.now())
   isPublic: boolean;
+  // *** Add the field here ***
+  lastMessageTimestamp?: FirestoreTimestamp;
 }
 
 // Define input type for creating activities
 export type NewActivity = Omit<
   Activity,
-  'id' | 'participantIds' | 'createdAt'
+  'id' | 'participantIds' | 'createdAt' | 'lastMessageTimestamp' // Exclude new field too
 >;
 
 // Define store state
@@ -64,226 +69,265 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   isLoading: false,
   error: null,
 
+  // --- Initialize Listener (Consider type safety) ---
   initializeListener: (userId = '', showFriendsOnly = false) => {
-    set({ isLoading: true });
-    const q = query(collection(db, 'activities'), orderBy('dateTime'));
+    console.log(`%cDEBUG: activityStore.initializeListener - Initializing... User: ${userId || 'None'}, ShowFriendsOnly: ${showFriendsOnly}`, 'color: brown;');
+    set({ isLoading: true, error: null });
+    // Adjust query based on userId/showFriendsOnly if needed later
+    // For now, keeping the original query logic
+    const q = query(collection(db, 'activities'), orderBy('dateTime')); // Still orders by original dateTime
+
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
+        console.log(`%cDEBUG: activityStore.initializeListener - Snapshot received. Docs: ${querySnapshot.size}`, 'color: brown;');
         const activitiesData: Activity[] = [];
         querySnapshot.forEach((docSnap) => {
-          const data = docSnap.data() as any;
+          const data = docSnap.data(); // Get typed data potentially
+          // Add more robust type checking if possible
           activitiesData.push({
             id: docSnap.id,
-            title: data.title || '',
+            title: data.title || 'Untitled',
             description: data.description || '',
-            location: data.location || '',
+            location: data.location || 'No location',
             latitude: typeof data.latitude === 'number' ? data.latitude : 0,
             longitude: typeof data.longitude === 'number' ? data.longitude : 0,
-            dateTime: data.dateTime || '',
-            category: data.category || 'All',
+            // Keep dateTime as stored for now, handle conversion in UI if needed
+            dateTime: data.dateTime || new Date().toISOString(), // Default to now if missing? Risky.
+            category: data.category || 'Other',
             createdBy: {
-              userId: data.createdBy?.userId || '',
-              displayName: data.createdBy?.displayName || 'Anonymous',
+              userId: data.createdBy?.userId || 'unknown',
+              displayName: data.createdBy?.displayName || 'Unknown',
             },
-            participantIds: data.participantIds || [],
-            maxParticipants: data.maxParticipants,
-            createdAt: data.createdAt || Date.now(),
-            isPublic: data.isPublic ?? true,
+            participantIds: Array.isArray(data.participantIds) ? data.participantIds : [],
+            maxParticipants: typeof data.maxParticipants === 'number' ? data.maxParticipants : undefined,
+            // createdAt should ideally be Firestore Timestamp, but using number from your code
+            createdAt: typeof data.createdAt === 'number' ? data.createdAt : Date.now(),
+            isPublic: typeof data.isPublic === 'boolean' ? data.isPublic : true,
+            // *** Include lastMessageTimestamp when reading ***
+            lastMessageTimestamp: data.lastMessageTimestamp instanceof FirestoreTimestamp ? data.lastMessageTimestamp : undefined,
           });
         });
 
+        // Client-side sort by dateTime (as original code did)
+        // The Firestore query in Chats.tsx handles the lastMessageTimestamp sort
         activitiesData.sort(
-          (a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()
+          (a, b) => {
+              try {
+                 // Assuming dateTime is string ISO format or Timestamp
+                 const timeA = typeof a.dateTime === 'string' ? new Date(a.dateTime).getTime() : a.dateTime instanceof FirestoreTimestamp ? a.dateTime.toMillis() : 0;
+                 const timeB = typeof b.dateTime === 'string' ? new Date(b.dateTime).getTime() : b.dateTime instanceof FirestoreTimestamp ? b.dateTime.toMillis() : 0;
+                 return timeA - timeB;
+              } catch (e) { return 0; } // Handle potential date parsing errors
+          }
         );
-        set({ activities: activitiesData, isLoading: false });
+        console.log(`%cDEBUG: activityStore.initializeListener - Setting ${activitiesData.length} activities.`, 'color: brown;');
+        set({ activities: activitiesData, isLoading: false, error: null });
       },
       (error) => {
-        console.error('Error getting activities:', error);
+        console.error('%cDEBUG: activityStore.initializeListener - Error:', 'color: red;', error);
         set({ error, isLoading: false });
       }
     );
 
+    // Return the unsubscribe function for cleanup
     return unsubscribe;
   },
 
+
+  // --- Create Activity ---
   createActivity: async (activity) => {
+     console.log('%cDEBUG: activityStore.createActivity - Attempting to create:', 'color: blue;', activity);
     try {
       const { title, description, location, latitude, longitude, dateTime, category, createdBy, maxParticipants, isPublic } =
         activity;
 
-      if (!title || !description || !location || !dateTime || !category) {
-        throw new Error('Missing required fields for activity');
+      // Basic validation
+      if (!title || !description || !location || !dateTime || !category || !createdBy?.userId) {
+         console.error('%cDEBUG: activityStore.createActivity - Missing required fields', 'color: red;', activity);
+        throw new Error('Missing required fields for activity (title, description, location, dateTime, category, createdBy.userId)');
       }
 
-      const activityRef = doc(collection(db, 'activities'));
-      const newActivity = {
+      const activityRef = doc(collection(db, 'activities')); // Generate new Doc Ref
+      const creationTimeMillis = Date.now(); // JS Timestamp for createdAt
+
+      // *** Convert creationTimeMillis to Firestore Timestamp for lastMessageTimestamp ***
+      const initialLastMessageTimestamp = FirestoreTimestamp.fromMillis(creationTimeMillis);
+
+      const newActivityData = {
         title,
         description,
         location,
-        latitude,
-        longitude,
-        dateTime,
+        latitude: latitude ?? 0, // Default latitude
+        longitude: longitude ?? 0, // Default longitude
+        // Store dateTime as provided (string or Timestamp) - Consider standardizing to Timestamp later
+        dateTime: dateTime,
         category,
         createdBy: {
           userId: createdBy.userId,
           displayName: createdBy.displayName || 'Anonymous',
         },
-        participantIds: [createdBy.userId],
-        createdAt: Date.now(),
-        maxParticipants,
-        isPublic: isPublic ?? true,
+        participantIds: [createdBy.userId], // Creator is the first participant
+        createdAt: creationTimeMillis, // Store JS Timestamp for createdAt (as per original code)
+        // *** Add the default lastMessageTimestamp ***
+        lastMessageTimestamp: initialLastMessageTimestamp,
+        // Only include maxParticipants if it's a positive number
+        ...(maxParticipants && maxParticipants > 0 && { maxParticipants }),
+        isPublic: isPublic ?? true, // Default to public if not specified
       };
 
-      await setDoc(activityRef, newActivity);
+      console.log('%cDEBUG: activityStore.createActivity - Data to be set:', 'color: blue;', newActivityData);
+      await setDoc(activityRef, newActivityData);
+      console.log(`%cDEBUG: activityStore.createActivity - Successfully created with ID: ${activityRef.id}`, 'color: green;');
+
+      // Maybe automatically join/create chat here? Or keep it lazy? Current code assumes lazy.
+      // Example: await useChatStore.getState().createOrJoinActivityChat(activityRef.id, { uid: createdBy.userId, displayName: createdBy.displayName } as any);
+
+
       return activityRef.id;
     } catch (error) {
-      console.error('Error creating activity:', error);
+      console.error('%cDEBUG: activityStore.createActivity - Error:', 'color: red;', error);
       set({ error: error as Error });
-      throw error;
+      throw error; // Re-throw error
     }
   },
-  
-  // Join an activity
+
+  updateLastMessage: async (
+    activityId: string,
+    text: string,
+    senderName: string,
+    timestampMillis: number
+  ) => {
+    console.log(
+      `%cDEBUG: activityStore.updateLastMessage – Updating activity ${activityId}`,
+      'color: purple;'
+    );
+    const activityRef = doc(db, 'activities', activityId);
+    await updateDoc(activityRef, {
+      lastMessageText: text,
+      lastMessageSenderName: senderName,
+      lastMessageTimestamp: FirestoreTimestamp.fromMillis(timestampMillis)
+    });
+  },
+
+  // --- Join Activity ---
   joinActivity: async (activityId, userId) => {
+     console.log(`%cDEBUG: activityStore.joinActivity - User: ${userId}, Activity: ${activityId}`, 'color: blue;');
     try {
       if (!activityId || !userId) {
         throw new Error('Activity ID and user ID are required');
       }
-      
+
       const activityRef = doc(db, 'activities', activityId);
-      const activityDoc = await getDoc(activityRef);
-      
-      if (!activityDoc.exists()) {
-        throw new Error('Activity not found');
-      }
-      
-      const activityData = activityDoc.data();
-      
-      // Check if the user is already a participant
-      if (activityData.participantIds?.includes(userId)) {
-        console.log('User already joined this activity');
-        return; // User is already a participant, do nothing
-      }
-      
-      // Check if the activity is full
-      if (activityData.maxParticipants && 
-          activityData.participantIds?.length >= activityData.maxParticipants) {
-        throw new Error('Activity is full');
-      }
-      
-      // Add user to participants array
+      // Use a transaction or batched write if joining needs to be more atomic with other potential actions
       await updateDoc(activityRef, {
-        participantIds: arrayUnion(userId),
+        participantIds: arrayUnion(userId), // Atomically add user ID if not present
       });
-      
-      // Note: Chat creation/joining moved to lazy load when entering chat page
-      console.log('Activity joined successfully, chat will be created when needed');
-      
+
+      // Check if update was successful (optional, updateDoc throws on error)
+      console.log(`%cDEBUG: activityStore.joinActivity - Firestore updated for ${activityId}.`, 'color: green;');
+
+      // Lazy chat join is handled elsewhere
+
       console.log(`User ${userId} joined activity ${activityId}`);
     } catch (error) {
-      console.error('Error joining activity:', error);
+       // Check for specific errors like permission denied or not found?
+      console.error(`%cDEBUG: activityStore.joinActivity - Error joining activity ${activityId}:`, 'color: red;', error);
       set({ error: error as Error });
       throw error;
     }
   },
-  
-  // Leave an activity
+
+  // --- Leave Activity ---
   leaveActivity: async (activityId, userId) => {
+      console.log(`%cDEBUG: activityStore.leaveActivity - User: ${userId}, Activity: ${activityId}`, 'color: orange;');
     try {
       if (!activityId || !userId) {
         throw new Error('Activity ID and user ID are required');
       }
-      
+
       const activityRef = doc(db, 'activities', activityId);
-      const activityDoc = await getDoc(activityRef);
-      
-      if (!activityDoc.exists()) {
-        throw new Error('Activity not found');
-      }
-      
-      const activityData = activityDoc.data();
-      
-      // Check if the user is actually a participant
-      if (!activityData.participantIds?.includes(userId)) {
-        console.log('User is not a participant in this activity');
-        return; // User is not a participant, do nothing
-      }
-      
-      // Check if user is the creator
-      if (activityData.createdBy?.userId === userId) {
-        // Optional: Prevent creator from leaving, or implement special handling
-        console.log('Creator attempted to leave their own activity');
-      }
-      
-      // Remove user from participants array
+      // Check if user is creator first (optional, based on your app logic)
+      // const activityDoc = await getDoc(activityRef);
+      // if (activityDoc.exists() && activityDoc.data()?.createdBy?.userId === userId) { ... }
+
+      // Atomically remove user ID if present
       await updateDoc(activityRef, {
         participantIds: arrayRemove(userId),
       });
-      
-      // Leave the activity chat
+       console.log(`%cDEBUG: activityStore.leaveActivity - Firestore updated for ${activityId}.`, 'color: orange;');
+
+
+      // Leave the activity chat using the chatStore
       try {
-        const chatStore = useChatStore.getState();
-        await chatStore.leaveActivityChat(activityId, userId);
+        console.log(`%cDEBUG: activityStore.leaveActivity - Calling chatStore.leaveActivityChat for ${activityId}.`, 'color: orange;');
+        await useChatStore.getState().leaveActivityChat(activityId, userId);
+         console.log(`%cDEBUG: activityStore.leaveActivity - chatStore.leaveActivityChat completed for ${activityId}.`, 'color: green;');
       } catch (chatError) {
-        console.error('Error leaving chat after leaving activity:', chatError);
-        // Don't fail the leave operation if chat leaving fails
+        console.error('%cDEBUG: activityStore.leaveActivity - Error calling leaveActivityChat, continuing leave operation:', 'color: red;', chatError);
+        // Log error but don't stop the activity leave process
       }
-      
+
       console.log(`User ${userId} left activity ${activityId}`);
     } catch (error) {
-      console.error('Error leaving activity:', error);
+      console.error(`%cDEBUG: activityStore.leaveActivity - Error leaving activity ${activityId}:`, 'color: red;', error);
       set({ error: error as Error });
       throw error;
     }
   },
-  
-  // Check if a user is a participant in an activity
+
+  // --- isParticipant (uses local state) ---
   isParticipant: (activityId, userId) => {
     if (!activityId || !userId) return false;
-    
     const activity = get().activities.find(a => a.id === activityId);
-    return activity ? activity.participantIds?.includes(userId) : false;
+    const isPart = !!activity && Array.isArray(activity.participantIds) && activity.participantIds.includes(userId);
+    // console.log(`%cDEBUG: activityStore.isParticipant - Activity: ${activityId}, User: ${userId}, Result: ${isPart}`, 'color: gray;');
+    return isPart;
   },
   
-  // Delete an activity
+
+   // --- Delete Activity ---
   deleteActivity: async (activityId, userId) => {
+     console.log(`%cDEBUG: activityStore.deleteActivity - User: ${userId}, Activity: ${activityId}`, 'color: red; font-weight: bold;');
     try {
       if (!activityId || !userId) {
         throw new Error('Activity ID and user ID are required');
       }
-      
+
       const activityRef = doc(db, 'activities', activityId);
-      const activityDoc = await getDoc(activityRef);
-      
+      const activityDoc = await getDoc(activityRef); // Get doc to check creator
+
       if (!activityDoc.exists()) {
+        console.warn(`%cDEBUG: activityStore.deleteActivity - Activity ${activityId} not found.`, 'color: orange;');
         throw new Error('Activity not found');
       }
-      
+
       const activityData = activityDoc.data();
-      
-      // Check if the user is the creator of the activity
+
+      // Authorization Check: Only the creator can delete
       if (activityData.createdBy?.userId !== userId) {
-        throw new Error('Only the creator can delete an activity');
+         console.error(`%cDEBUG: activityStore.deleteActivity - Unauthorized attempt by ${userId} to delete activity ${activityId} created by ${activityData.createdBy?.userId}.`, 'color: red;');
+        throw new Error('Only the creator can delete this activity');
       }
-      
+
       // Delete the activity document
       await deleteDoc(activityRef);
-      
-      // Clean up related chat data if it exists
-      try {
-        const chatStore = useChatStore.getState();
-        // This would typically be a method to clean up chat data, but we'll implement it in the chat cleanup task
-        // For now, we just log it
-        console.log(`Activity ${activityId} deleted, chat data will be cleaned up separately`);
-      } catch (chatError) {
-        console.error('Error cleaning up chat after deleting activity:', chatError);
-        // Don't fail the delete operation if chat cleanup fails
-      }
-      
-      console.log(`Activity ${activityId} deleted successfully`);
+      console.log(`%cDEBUG: activityStore.deleteActivity - Firestore document ${activityId} deleted.`, 'color: red;');
+
+
+      // Optional: Clean up chat data - This needs careful implementation
+      // Consider using Firebase Functions for robust cleanup triggered by Firestore delete event
+      console.warn(`%cDEBUG: activityStore.deleteActivity - Chat data cleanup for ${activityId} should be handled (e.g., via Firebase Functions or a separate cleanup task).`, 'color: orange;');
+      // Example if you had a cleanup function in chatStore:
+      // try {
+      //   await useChatStore.getState().cleanupChatDataForActivity(activityId);
+      // } catch (chatCleanupError) {
+      //   console.error(`%cDEBUG: activityStore.deleteActivity - Error during chat cleanup for ${activityId}:`, 'color: red;', chatCleanupError);
+      // }
+
+      console.log(`Activity ${activityId} deleted successfully by owner ${userId}`);
     } catch (error) {
-      console.error('Error deleting activity:', error);
+      console.error(`%cDEBUG: activityStore.deleteActivity - Error deleting activity ${activityId}:`, 'color: red;', error);
       set({ error: error as Error });
       throw error;
     }

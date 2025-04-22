@@ -11,8 +11,10 @@ import { MessageSquare, Loader2, Send, ArrowLeft, RefreshCw } from "lucide-react
 import { toast } from "sonner";
 import { formatTime } from "../utils/formatTime";
 import { ref, set, onValue, push, off, database, connectDatabaseEmulator } from "firebase/database";
-import { realtimeDb } from "../utils/firebase";
+import { realtimeDb, firestore} from "../utils/firebase";
 import { useChatStore } from "../utils/chatStore";
+import { doc, updateDoc, Timestamp as FirestoreTimestamp } from "firebase/firestore";
+import { useActivityStore } from '../utils/activityStore';  // adjust path
 
 // Simplified chat message interface
 interface ChatMessage {
@@ -235,38 +237,42 @@ const SimpleChatInterface: React.FC<SimpleChatInterfaceProps> = ({ activityId })
   
   // Handle sending a message
   const handleSendMessage = async () => {
-    if (!messageText?.trim() || !user || sending) {
-      return;
-    }
-    
+    if (!messageText?.trim() || !user || sending) return;
+  
+    setSending(true);
     try {
-      setSending(true);
-      
-      if (!realtimeDb) {
-        throw new Error("Database not available");
-      }
-      
+      // 1) push into RealtimeDB
       const messagesRef = ref(realtimeDb, `chat-messages/${activityId}`);
       const newMessageRef = push(messagesRef);
-      
-      // Create message object
+      const nowTs = Date.now();
       const messageData = {
         senderId: user.uid,
-        senderName: user.displayName || "Anonymous",
+        senderName: user.displayName || 'Anonymous',
         text: messageText.trim(),
-        timestamp: Date.now()
+        timestamp: nowTs
       };
-      
-      // Save to database
       await set(newMessageRef, messageData);
-      setMessageText("");
-    } catch (error) {
-      console.error("Error sending message:", error);
-      toast.error("Failed to send message");
+  
+      // 2) mirror into Firestore activity doc
+      await useActivityStore
+        .getState()
+        .updateLastMessage(
+          activityId,
+          messageData.text,
+          messageData.senderName,
+          nowTs
+        );
+  
+      setMessageText('');
+    } catch (err) {
+      console.error('Error sending message:', err);
+      toast.error('Failed to send message');
     } finally {
       setSending(false);
     }
   };
+
+  
   
   // Handle enter key press
   const handleKeyPress = (e: React.KeyboardEvent) => {
