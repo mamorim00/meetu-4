@@ -1,17 +1,33 @@
+// src/pages/Feed.tsx
+
 import React, { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { ActivityCard } from "components/ActivityCard";
 import { Layout } from "components/Layout";
 import { useActivityStore } from "../utils/activityStore";
 import { useUserGuardContext } from "app";
 import { useFriendsStore } from "../utils/friendsStore";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import LocationAutocomplete from "components/LocationAutocomplete";
 
-export type ActivityCategory = 
+// Haversine formula to compute distance between two lat/lng points in km
+function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+export type ActivityCategory =
   | "All"
   | "Sports"
   | "Dining"
@@ -22,194 +38,185 @@ export type ActivityCategory =
   | "Music"
   | "Cooking";
 
-
-// Activity feed page component
 export default function Feed() {
-  const [activeCategory, setActiveCategory] = useState<ActivityCategory>("All");
+  // Primary filters
   const [searchQuery, setSearchQuery] = useState("");
   const [showFriendsOnly, setShowFriendsOnly] = useState(false);
   const [showPrivateActivities, setShowPrivateActivities] = useState(true);
+
+  // Near‑me filters (always visible)
+  const [cityQuery, setCityQuery] = useState("");
+  const [center, setCenter] = useState<{ name: string; lat: number; lng: number } | null>(null);
+  const [radiusKm, setRadiusKm] = useState<number>(10);
+
+  // “More Filters”
   const [timeFilter, setTimeFilter] = useState<"upcoming" | "archive">("upcoming");
+  const [activeCategory, setActiveCategory] = useState<ActivityCategory>("All");
+
   const { user } = useUserGuardContext();
-  const { activities, isLoading, error, initializeListener } = useActivityStore();
-  const { friends, isFriend } = useFriendsStore();
-  
-  // Initialize the activities listener when component mounts or filter changes
+  const { activities, isLoading, initializeListener } = useActivityStore();
+  const { isFriend } = useFriendsStore();
+
+  // Real‑time listener
   useEffect(() => {
-    // Initialize activities listener - we'll filter in the component
-    const unsubscribe = initializeListener(user.uid);
-    return () => unsubscribe(); // Clean up listener when component unmounts
+    const unsub = initializeListener(user.uid);
+    return () => unsub();
   }, [initializeListener, user.uid]);
 
-  // Filter activities based on time (upcoming vs archive)
-  const timeFilteredActivities = useMemo(() => {
+  // Time filter
+  const timeFiltered = useMemo(() => {
     const now = new Date();
-    
-    return activities.filter(activity => {
-      // Parse the activity date
-      const activityDate = new Date(activity.dateTime);
-      
-      // Check if the activity is in the future or past
-      if (timeFilter === "upcoming") {
-        return activityDate >= now;
-      } else { // "archive"
-        return activityDate < now;
-      }
-    });
+    return activities.filter(act =>
+      timeFilter === "upcoming"
+        ? new Date(act.dateTime) >= now
+        : new Date(act.dateTime) < now
+    );
   }, [activities, timeFilter]);
-  
-  // Filter activities based on active category, search query, privacy settings, and friends filter
-  const filteredActivities = timeFilteredActivities.filter((activity) => {
-    // Filter by category
-    const matchesCategory = activeCategory === "All" || activity.category === activeCategory;
-    
-    // Filter by search query
-    const matchesSearch = 
-      searchQuery === "" || 
-      activity.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      activity.description.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      activity.location.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    // Privacy checks - activity is shown if:
-    // 1. It's the user's own activity
-    const isOwnActivity = activity.createdBy.userId === user.uid;
-    
-    // 2. It's a public activity
-    const isPublic = activity.isPublic !== false; // Default to true for backward compatibility
-    
-    // 3. It's a private activity, but creator is a friend
+
+  // Combined filters
+  const filteredActivities = timeFiltered.filter(activity => {
+    // Search
+    const q = searchQuery.toLowerCase();
+    if (
+      q &&
+      !activity.title.toLowerCase().includes(q) &&
+      !activity.description.toLowerCase().includes(q) &&
+      !activity.location.toLowerCase().includes(q)
+    ) return false;
+
+    // Privacy & friends
+    const isOwn = activity.createdBy.userId === user.uid;
+    const isPublic = activity.isPublic !== false;
     const creatorIsFriend = isFriend(activity.createdBy.userId);
-    const isPrivateFriendsActivity = !isPublic && creatorIsFriend;
-    
-    // Determine if the activity should be shown based on privacy settings
-    // Show all if private activities are included, otherwise only show public ones unless they're own or from friends
-    const isVisibleBasedOnPrivacy = 
-      isOwnActivity || // Always show user's own activities
-      isPublic || // Show public activities
-      (showPrivateActivities && isPrivateFriendsActivity); // Show private activities from friends if toggle is on
-    
-    // Apply friends-only filter if enabled - show only activities from friends and own activities
-    const matchesFriendshipFilter = 
-      !showFriendsOnly || // If filter not enabled, show all
-      isOwnActivity || // Always include user's own activities
-      (creatorIsFriend); // Only include friends' activities if filter enabled
-    
-    return matchesCategory && matchesSearch && isVisibleBasedOnPrivacy && matchesFriendshipFilter;
+    const showPriv = showPrivateActivities && !isPublic && creatorIsFriend;
+    if (!(isOwn || isPublic || showPriv)) return false;
+    if (showFriendsOnly && !(isOwn || creatorIsFriend)) return false;
+
+    // Near‑me
+    if (center) {
+      const dist = getDistance(center.lat, center.lng, activity.latitude, activity.longitude);
+      if (dist > radiusKm) return false;
+    }
+
+    // Category
+    if (activeCategory !== "All" && activity.category !== activeCategory) return false;
+
+    return true;
   });
 
   return (
     <Layout title="Activity Feed">
-      <div className="container mx-auto max-w-7xl px-6 pt-2">
-          {/* Timeline filter tabs */}
-          <div className="mb-6">
-            <Tabs defaultValue="upcoming" className="w-full" onValueChange={(value) => setTimeFilter(value as "upcoming" | "archive")}>
-              <TabsList className="w-[400px] grid grid-cols-2 h-auto">
-                <TabsTrigger value="upcoming" className="rounded-full m-1">Upcoming Activities</TabsTrigger>
-                <TabsTrigger value="archive" className="rounded-full m-1">Archive</TabsTrigger>
-              </TabsList>
-            </Tabs>
+      <div className="container mx-auto max-w-7xl px-6 pt-4 space-y-6">
+        
+        {/* Search & Toggles */}
+        <div className="flex flex-col sm:flex-row gap-4">
+          <Input
+            placeholder="Search activities..."
+            className="flex-1 rounded-full"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <div className="flex items-center gap-2">
+            <Switch checked={showFriendsOnly} onCheckedChange={setShowFriendsOnly} id="friends-only" />
+            <Label htmlFor="friends-only" className="cursor-pointer">Friends only</Label>
           </div>
-          
-          {/* Search and filter section */}
-            <div className="mb-8 space-y-4">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <Input
-                type="text"
-                placeholder="Search activities..."
-                className="rounded-full"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="show-friends"
-                  checked={showFriendsOnly}
-                  onCheckedChange={setShowFriendsOnly}
-                />
-                <Label htmlFor="show-friends" className="text-sm cursor-pointer">
-                  Friends only
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="show-private"
-                  checked={showPrivateActivities}
-                  onCheckedChange={setShowPrivateActivities}
-                />
-                <Label htmlFor="show-private" className="text-sm cursor-pointer">
-                  Include private activities
-                </Label>
-              </div>
-              <Button
-                variant="outline"
-                className="rounded-full sm:w-auto w-full"
-                onClick={() => setSearchQuery("")}
-              >
-                Clear
-              </Button>
-            </div>
-            
-            {/* Activity category tabs */}
-            <Tabs defaultValue="All" className="w-full" onValueChange={(value) => setActiveCategory(value as ActivityCategory)}>
-              <TabsList className="grid grid-cols-3 md:grid-cols-9 h-auto bg-muted/20">
-                <TabsTrigger value="All" className="rounded-full m-1">All</TabsTrigger>
-                <TabsTrigger value="Sports" className="rounded-full m-1">Sports</TabsTrigger>
-                <TabsTrigger value="Dining" className="rounded-full m-1">Dining</TabsTrigger>
-                <TabsTrigger value="Hiking" className="rounded-full m-1">Hiking</TabsTrigger>
-                <TabsTrigger value="Gaming" className="rounded-full m-1">Gaming</TabsTrigger>
-                <TabsTrigger value="Movies" className="rounded-full m-1">Movies</TabsTrigger>
-                <TabsTrigger value="Travel" className="rounded-full m-1">Travel</TabsTrigger>
-                <TabsTrigger value="Music" className="rounded-full m-1">Music</TabsTrigger>
-                <TabsTrigger value="Cooking" className="rounded-full m-1">Cooking</TabsTrigger>
-              </TabsList>
+          <div className="flex items-center gap-2">
+            <Switch checked={showPrivateActivities} onCheckedChange={setShowPrivateActivities} id="include-private" />
+            <Label htmlFor="include-private" className="cursor-pointer">Include private</Label>
+          </div>
+          <Button variant="outline" onClick={() => setSearchQuery("")}>
+            Clear search
+          </Button>
+        </div>
 
-              {/* Content for all tabs */}
-              <TabsContent value="All" className="mt-6">
-                {isLoading ? (
-                  <div className="text-center py-12">
-                    <p className="text-muted-foreground">Loading activities...</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {filteredActivities.map((activity) => (
-                        <ActivityCard key={activity.id} activity={activity} />
-                      ))}
-                    </div>
-                    {filteredActivities.length === 0 && (
-                      <div className="text-center py-12">
-                        <p className="text-muted-foreground">No activities found. Try adjusting your filters.</p>
-                      </div>
-                    )}
-                  </>
-                )}
-              </TabsContent>
+        {/* Near‑Me Filter (always visible) */}
+        <div className="flex flex-col sm:flex-row gap-4">
+          <LocationAutocomplete
+            value={cityQuery}
+            onChange={setCityQuery}
+            onSelect={({ formatted, lat, lng }) => {
+              setCityQuery(formatted);
+              setCenter({ name: formatted, lat, lng });
+            }}
+            placeholder="Filter by city..."
+          />
+          <Input
+            type="number"
+            placeholder="Radius (km)"
+            className="w-32"
+            value={radiusKm}
+            min={1}
+            onChange={(e) => setRadiusKm(Number(e.target.value))}
+          />
+          <Button
+            variant="outline"
+            onClick={() => {
+              setCityQuery("");
+              setCenter(null);
+            }}
+          >
+            Clear location
+          </Button>
+        </div>
+
+        {/* More Filters Accordion */}
+        <Accordion type="single" collapsible>
+          <AccordionItem value="moreFilters">
+            <AccordionTrigger className="bg-muted/20 rounded-md px-4 py-2">
+              More Filters
+            </AccordionTrigger>
+            <AccordionContent className="space-y-6 p-4 bg-muted/10 rounded-b-md">
               
-              {/* Duplicate content for other tabs - they'll show the same filtered content */}
-              {["Sports", "Dining", "Hiking", "Gaming", "Movies", "Travel", "Music", "Cooking"].map((category) => (
-                <TabsContent key={category} value={category} className="mt-6">
-                  {isLoading ? (
-                    <div className="text-center py-12">
-                      <p className="text-muted-foreground">Loading activities...</p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {filteredActivities.map((activity) => (
-                          <ActivityCard key={activity.id} activity={activity} />
-                        ))}
-                      </div>
-                      {filteredActivities.length === 0 && (
-                        <div className="text-center py-12">
-                          <p className="text-muted-foreground">No activities found. Try adjusting your filters.</p>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </TabsContent>
-              ))}
-            </Tabs>
+              {/* Time Tabs */}
+              <Tabs
+                value={timeFilter}
+                onValueChange={(v) => setTimeFilter(v as "upcoming" | "archive")}
+                className="w-full"
+              >
+                <TabsList className="w-[360px] grid grid-cols-2">
+                  <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
+                  <TabsTrigger value="archive">Archive</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              {/* Category Tabs */}
+              <Tabs
+                value={activeCategory}
+                onValueChange={(v) => setActiveCategory(v as ActivityCategory)}
+                className="w-full"
+              >
+                <TabsList className="grid grid-cols-3 md:grid-cols-9 bg-muted/20 rounded-md p-1">
+                  {["All", "Sports", "Dining", "Hiking", "Gaming", "Movies", "Travel", "Music", "Cooking"].map(cat => (
+                    <TabsTrigger key={cat} value={cat} className="m-1 rounded-full">
+                      {cat}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
+
+        {/* Activity Grid */}
+        {isLoading ? (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground">Loading activities...</p>
           </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredActivities.map(act => (
+              <ActivityCard key={act.id} activity={act} />
+            ))}
+            {filteredActivities.length === 0 && (
+              <div className="text-center py-12 col-span-full">
+                <p className="text-muted-foreground">
+                  No activities found. Try adjusting your filters.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </Layout>
   );
