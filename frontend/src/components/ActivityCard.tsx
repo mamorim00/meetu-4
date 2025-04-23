@@ -10,6 +10,8 @@ import { toast } from "sonner";
 import { useFriendsStore } from "../utils/friendsStore";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useNavigate } from "react-router-dom";
+import { Timestamp } from 'firebase/firestore';
+
 
 interface Props {
   activity: Activity;
@@ -85,22 +87,35 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
       setLeaving(false);
     }
   };
-  // Format the date to be more readable
-  const formattedDate = new Date(activity.dateTime).toLocaleDateString("en-US", {
+
+  let dateObject: Date;
+
+  if (activity.dateTime instanceof Timestamp) {
+    // If it's a Firebase Timestamp, convert it to a JS Date object
+    dateObject = activity.dateTime.toDate();
+  } else {
+    // If it's a string or number, pass it to the Date constructor
+    // new Date() can parse standard date strings and numeric timestamps
+    dateObject = new Date(activity.dateTime);
+  }
+  
+  // Now use the native Date object (dateObject) to format the date
+  const formattedDate = dateObject.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
-
-  // Format the time
-  const formattedTime = new Date(activity.dateTime).toLocaleTimeString("en-US", {
+  
+  // Use the native Date object (dateObject) to format the time
+  const formattedTime = dateObject.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   });
-
-  // Calculate how long until the event
-  const timeUntil = formatDistanceToNow(new Date(activity.dateTime), { addSuffix: true });
+  
+  // Use the native Date object (dateObject) to calculate how long until the event
+  const timeUntil = formatDistanceToNow(dateObject, { addSuffix: true });
+  
 
   // Get category color class based on category
   const getCategoryColorClass = (category: string) => {
@@ -280,3 +295,9 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
     </Card>
   );
 };
+
+
+
+
+
+

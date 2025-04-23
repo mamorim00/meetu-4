@@ -17,6 +17,7 @@ import { CalendarIcon, MapPinIcon, UsersIcon, Clock, ArrowLeft, UserPlus, Lock, 
 import { useChatStore } from "../utils/chatStore";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatActivityDateTime } from "../utils/formatTime";
+import { Timestamp } from "firebase/firestore";
 
 const ActivityDetailsContent = () => {
   const navigate = useNavigate();
@@ -37,12 +38,21 @@ const ActivityDetailsContent = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  // Format the date and time (if activity exists)
+  
   const formattedDateTime = useMemo(() => {
     if (!activity) return { date: "", time: "" };
-    return formatActivityDateTime(activity.dateTime);
+  
+    // extract the raw value
+    const raw = activity.dateTime;
+  
+    // if it's a Firestore Timestamp, call .toDate(), otherwise leave it as-is
+    const when: string | Date = raw instanceof Timestamp
+      ? raw.toDate()
+      : raw;
+  
+    // now "when" is only string | Date, which matches your helper
+    return formatActivityDateTime(when);
   }, [activity]);
-
   // Instead of calling store.isParticipant(), we check the local state.
   const userIsParticipant = useMemo(() => {
     if (!activity || !user) return false;

@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Layout } from "components/Layout";
 import { useUserGuardContext } from "app";
-import { useActivityStore, ActivityCategory } from "../utils/activityStore";
+import { useActivityStore } from "../utils/activityStore";
 import { toast } from "sonner";
 import LocationAutocomplete from "components/LocationAutocomplete";
 
@@ -28,6 +28,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ActivityCategory } from "./Feed";
 
 export const activityCategories: ActivityCategory[] = [
   "Sports",

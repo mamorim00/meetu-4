@@ -13,6 +13,9 @@ import { useFriendsStore } from "../utils/friendsStore";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import LocationAutocomplete from "components/LocationAutocomplete";
+import { Timestamp } from "firebase/firestore";
+
+
 
 // Haversine formula to compute distance between two lat/lng points in km
 function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -58,13 +61,20 @@ export default function Feed() {
     return () => unsub();
   }, [initializeListener, user.uid]);
 
+
   const timeFiltered = useMemo(() => {
     const now = new Date();
-    return activities.filter(act =>
-      timeFilter === "upcoming"
-        ? new Date(act.dateTime) >= now
-        : new Date(act.dateTime) < now
-    );
+    return activities.filter(act => {
+      // pick the right Date
+      const when =
+        act.dateTime instanceof Timestamp
+          ? act.dateTime.toDate()
+          : new Date(act.dateTime);
+  
+      return timeFilter === "upcoming"
+        ? when >= now
+        : when < now;
+    });
   }, [activities, timeFilter]);
 
   const filteredActivities = timeFiltered.filter(activity => {
@@ -188,7 +198,7 @@ export default function Feed() {
             <p className="text-muted-foreground">Loading activities...</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             {filteredActivities.map(act => (
               <ActivityCard key={act.id} activity={act} />
             ))}

@@ -1,12 +1,27 @@
 import { create } from 'zustand';
-import { ref, set, onValue, push, update, remove, serverTimestamp, off, DatabaseReference, DataSnapshot, query, orderByChild, endAt } from 'firebase/database';
+//import { ref, set, onValue, push, update, remove, serverTimestamp, off, DatabaseReference, DataSnapshot, query, orderByChild, endAt } from 'firebase/database';
 import { User } from 'firebase/auth';
 import { toast } from "sonner";
-import { realtimeDb, firestore } from './firebase'; // Assuming firebase.ts exports these
+import { realtimeDb, firestore } from './firebase'; // Import firestore
 import { doc, updateDoc, Timestamp as FirestoreTimestamp } from 'firebase/firestore'; // Import firestore functions
 
+import {
+  ref,
+  set    as rtdbSet,
+  onValue,
+  push,
+  update as rtdbUpdate,
+  remove as rtdbRemove,
+  serverTimestamp, 
+  off, 
+  DatabaseReference, 
+  DataSnapshot, 
+  query, 
+  orderByChild, 
+  endAt
+} from "firebase/database";
 
-// Define message interface (ensure this matches your component's interface or vice-versa)
+// Define message interface
 export interface ChatMessage {
   id: string;
   activityId: string;
@@ -29,11 +44,6 @@ export interface Chat {
   activityId: string;
   members: Record<string, ChatMember>;
   createdAt: number; // JS Timestamp (milliseconds)
-  // --- Add these fields for last message ---
-  lastMessageText?: string;
-  lastMessageSenderName?: string;
-  lastMessageTimestamp?: number; // JS Timestamp (milliseconds)
-  // ------------------------------------------
 }
 
 // Define store state
@@ -133,18 +143,14 @@ export const useChatStore = create<ChatState>((set, get) => {
         console.log(`%cDEBUG: subscribeToChat - Chat reference path: ${chatRef.toString()}`, 'color: #2196F3;');
 
         // --- Listener for Chat Metadata (Optional, if needed) ---
-        // This listener could be used in a chat list component to display the last message.
-        // We'll keep it here for completeness but it's not directly used *in this component*.
         const unsubscribeChat = onValue(chatRef, (snapshot: DataSnapshot) => {
-           console.log(`%cDEBUG: subscribeToChat [Chat Metadata Listener] - Snapshot received for ${activityId}. Exists: ${snapshot.exists()}. Path: ${chatRef.toString()}`, 'color: blue;');
-           const chatData = snapshot.val();
-           if (chatData) {
-             // You could potentially update chat metadata state here if needed elsewhere
-             // console.log("Chat Metadata:", chatData);
-           }
+           console.log(`%cDEBUG: subscribeToChat [Chat Listener] - Snapshot received for ${activityId}. Exists: ${snapshot.exists()}. Path: ${chatRef.toString()}`, 'color: blue;');
+           // You could update members or other chat metadata here if needed
+           // const chatData = snapshot.val();
+           // if (chatData) set({ currentChatId: chatData.id || activityId }); // Ensure currentChatId is set
         }, (error) => {
-           console.error(`%cDEBUG: subscribeToChat [Chat Metadata Listener] - Error for ${activityId}:`, 'color: red;', error);
-           // Do not set global error here, as message listener error is more critical for display
+           console.error(`%cDEBUG: subscribeToChat [Chat Listener] - Error for ${activityId}:`, 'color: red;', error);
+           set({ error: error as Error, isLoading: false });
         });
 
         // --- Listener for Messages ---
@@ -335,274 +341,311 @@ export const useChatStore = create<ChatState>((set, get) => {
             const newListeners = { ...state.messageListeners };
             delete newListeners[currentChatId];
             delete newListeners[`chat_${currentChatId}`];
-            return { ...state, messageListeners: newListeners, currentChatId: null, messages: [] }; // Clear messages on unsubscribe
+            console.log(`%cDEBUG: unsubscribeFromChat - Cleaned listeners from state for ${currentChatId}.`, 'color: gray;');
+            return {
+                ...state,
+                messageListeners: newListeners,
+                messages: [], // Clear messages when unsubscribing
+                currentChatId: null, // Clear current chat ID
+                isLoading: false,
+                error: null
+            };
         });
 
-        console.log(`%cDEBUG: unsubscribeFromChat END - Listeners for ${currentChatId} removed.`, 'color: #2196F3; font-weight: bold;');
-
       } else {
-          console.log(`%cDEBUG: unsubscribeFromChat - No currentChatId (${currentChatId}) or messageListeners to unsubscribe from.`, 'color: gray;');
+          console.log('%cDEBUG: unsubscribeFromChat - No currentChatId or listeners to unsubscribe from.', 'color: gray;');
+          // Still reset state if no specific chat was active
+           set({
+                messages: [],
+                currentChatId: null,
+                isLoading: false,
+                error: null
+            });
       }
+      console.log('%cDEBUG: unsubscribeFromChat END - Chat state reset.', 'color: #2196F3; font-weight: bold;');
     },
 
     // Create or join an activity chat
     createOrJoinActivityChat: async (activityId: string, user: User) => {
-      console.log(`%cDEBUG: createOrJoinActivityChat START - Activity: ${activityId}, User: ${user.uid}`, 'color: #8BC34A; font-weight: bold;');
-      const db = realtimeDb;
-      if (!db) {
-          console.error('%cDEBUG: createOrJoinActivityChat ERROR - Realtime Database not available', 'color: red;');
-          toast.error("Database not available");
-          return;
+      console.log(`%cDEBUG: createOrJoinActivityChat START - Activity: ${activityId}, User: ${user.uid}`, 'color: #4CAF50; font-weight: bold;');
+
+      if (!realtimeDb) {
+        console.error('%cDEBUG: createOrJoinActivityChat ERROR - Realtime Database not initialized', 'color: red;');
+        throw new Error('Chat service is unavailable - please try again later');
       }
 
-      const chatRef = ref(db, `activity-chats/${activityId}`);
-      const messagesRef = ref(db, `chat-messages/${activityId}`);
-      const timestamp = Date.now();
-
       try {
-        const snapshot = await new Promise<DataSnapshot>((resolve, reject) => {
-          onValue(chatRef, resolve, reject, { onlyOnce: true });
-        });
+        const chatRef = ref(realtimeDb, `activity-chats/${activityId}`);
+        console.log('%cDEBUG: createOrJoinActivityChat - Database URL:', 'color: green;', realtimeDb.app.options.databaseURL);
+        console.log('%cDEBUG: createOrJoinActivityChat - Chat reference path:', 'color: green;', chatRef.toString());
 
-        const chatData = snapshot.val();
-        console.log(`%cDEBUG: createOrJoinActivityChat - Existing chat data for ${activityId}:`, 'color: #8BC34A;', chatData);
+        // Use onValue with { onlyOnce: true } for a reliable single read
+        const chatSnapshot = await new Promise<DataSnapshot>((resolve, reject) => {
+            onValue(chatRef, resolve, (error) => {
+                 console.error(`%cDEBUG: createOrJoinActivityChat ERROR - Failed to read chat data for ${activityId}`, 'color: red;', error);
+                 reject(error);
+            }, { onlyOnce: true });
+         });
+
+        const chatData = chatSnapshot.val();
+        const timestamp = Date.now(); // JS Timestamp
 
         if (!chatData) {
-          console.log(`%cDEBUG: createOrJoinActivityChat - Chat ${activityId} does not exist. Creating...`, 'color: #8BC34A;');
-          // Create new chat
+          console.log(`%cDEBUG: createOrJoinActivityChat - No existing chat found for ${activityId}, creating new one.`, 'color: green;');
           const newChat: Chat = {
             id: activityId,
             activityId,
             members: {
               [user.uid]: {
                 userId: user.uid,
-                displayName: user.displayName || "Anonymous",
+                displayName: user.displayName || 'Anonymous',
                 joinedAt: timestamp
               }
             },
-            createdAt: timestamp,
-            // Initial last message (system message)
-            lastMessageText: `Welcome to the activity chat! This is where you can coordinate with other participants.`,
-            lastMessageSenderName: "System",
-            lastMessageTimestamp: timestamp
+            createdAt: timestamp
           };
-          await set(chatRef, newChat);
-          console.log(`%cDEBUG: createOrJoinActivityChat - Chat ${activityId} created.`, 'color: #4CAF50;');
 
-          // Add welcome message
+          await rtdbSet(chatRef, newChat)
+          console.log(`%cDEBUG: createOrJoinActivityChat - Created new chat metadata for ${activityId}.`, 'color: green;');
+
+          // Add initial system message
+          const messagesRef = ref(realtimeDb, `chat-messages/${activityId}`);
           const newMessageRef = push(messagesRef);
-          await set(newMessageRef, {
-            senderId: "system",
-            senderName: "System",
-            text: `Welcome to the activity chat! This is where you can coordinate with other participants.`,
-            timestamp
+          await rtdbSet(newMessageRef, {
+            senderId: 'system',
+            senderName: 'System',
+            text: `Chat created. Welcome! Coordinate with participants here.`,
+            timestamp: timestamp + 1 // Ensure slightly later timestamp
           });
-           console.log(`%cDEBUG: createOrJoinActivityChat - Welcome message added for ${activityId}.`, 'color: #4CAF50;');
+           console.log(`%cDEBUG: createOrJoinActivityChat - Added welcome message for ${activityId}.`, 'color: green;');
 
         } else {
-          console.log(`%cDEBUG: createOrJoinActivityChat - Chat ${activityId} exists. Checking membership...`, 'color: #8BC34A;');
-          // Just add user to members if not already there
-          if (!chatData.members || !chatData.members[user.uid]) {
-            console.log(`%cDEBUG: createOrJoinActivityChat - User ${user.uid} is not a member. Adding...`, 'color: #8BC34A;');
-            const memberRef = ref(db, `activity-chats/${activityId}/members/${user.uid}`);
-            await set(memberRef, {
-              userId: user.uid,
-              displayName: user.displayName || "Anonymous",
-              joinedAt: timestamp
-            });
-            console.log(`%cDEBUG: createOrJoinActivityChat - User ${user.uid} added to members of ${activityId}.`, 'color: #4CAF50;');
+          console.log(`%cDEBUG: createOrJoinActivityChat - Chat exists for ${activityId}, ensuring user is a member.`, 'color: green;');
+          const memberRef = ref(realtimeDb, `activity-chats/${activityId}/members/${user.uid}`);
+          const memberSnapshot = await new Promise<DataSnapshot>((resolve, reject) => {
+            onValue(memberRef, resolve, reject, { onlyOnce: true });
+           });
 
-            // Add system message about new member
-            const newMessageRef = push(messagesRef);
-            const memberJoinMessage = `${user.displayName || "A new participant"} has joined the chat.`;
-            const messageData = {
-                senderId: "system",
-                senderName: "System",
-                text: memberJoinMessage,
-                timestamp
-            };
-            await set(newMessageRef, messageData);
-            console.log(`%cDEBUG: createOrJoinActivityChat - Member join system message added for ${activityId}.`, 'color: #4CAF50;');
+          if (!memberSnapshot.exists()) {
+             console.log(`%cDEBUG: createOrJoinActivityChat - Adding user ${user.uid} to members of ${activityId}.`, 'color: green;');
+             await rtdbSet(memberRef, {
+                userId: user.uid,
+                displayName: user.displayName || 'Anonymous',
+                joinedAt: timestamp
+             });
 
-            // --- UPDATE LAST MESSAGE ON CHAT ENTRY ---
-            const chatEntryUpdates: any = {
-              lastMessageText: memberJoinMessage,
-              lastMessageSenderName: "System",
-              lastMessageTimestamp: timestamp
-            };
-            await update(chatRef, chatEntryUpdates);
-            console.log(`%cDEBUG: createOrJoinActivityChat - Updated last message in activity-chats/${activityId} with system message.`, 'color: #4CAF50;');
-            // --- END UPDATE ---
-
+             // Add join system message
+             const messagesRef = ref(realtimeDb, `chat-messages/${activityId}`);
+             const newMessageRef = push(messagesRef);
+             await rtdbSet(newMessageRef, {
+                senderId: 'system',
+                senderName: 'System',
+                text: `${user.displayName || 'A new participant'} has joined the chat.`,
+                timestamp: timestamp + 1
+             });
+              console.log(`%cDEBUG: createOrJoinActivityChat - Added join message for ${user.uid} in ${activityId}.`, 'color: green;');
           } else {
-             console.log(`%cDEBUG: createOrJoinActivityChat - User ${user.uid} is already a member of ${activityId}.`, 'color: gray;');
+              console.log(`%cDEBUG: createOrJoinActivityChat - User ${user.uid} is already a member of ${activityId}.`, 'color: gray;');
           }
         }
-        console.log(`%cDEBUG: createOrJoinActivityChat END - Successfully created/joined chat ${activityId}`, 'color: #8BC34A; font-weight: bold;');
+
+        // Automatically subscribe after joining/creating
+        console.log(`%cDEBUG: createOrJoinActivityChat - Attempting to subscribe to chat ${activityId} after join/create.`, 'color: green;');
+        await get().subscribeToChat(activityId, user.uid);
+        console.log(`%cDEBUG: createOrJoinActivityChat END - Successfully created/joined and subscribed to ${activityId}`, 'color: #4CAF50; font-weight: bold;');
 
       } catch (error) {
-        console.error(`%cDEBUG: createOrJoinActivityChat ERROR for ${activityId}:`, 'color: red;', error);
-        toast.error("Failed to initialize chat");
-        set({ error: error as Error }); // Set error state
-        throw error; // Re-throw to allow calling component to handle
+        console.error('%cDEBUG: createOrJoinActivityChat FATAL ERROR:', 'color: red; font-weight: bold;', error);
+        set({ error: error as Error });
+        throw error; // Re-throw to notify caller
       }
     },
 
-    // Leave an activity chat (Optional: You might implement this if users can leave)
+    // Leave an activity chat
     leaveActivityChat: async (activityId: string, userId: string) => {
-       console.log(`%cDEBUG: leaveActivityChat START - Activity: ${activityId}, User: ${userId}`, 'color: #FF5722; font-weight: bold;');
-        const db = realtimeDb;
-         if (!db) {
-            console.error('%cDEBUG: leaveActivityChat ERROR - Realtime Database not available', 'color: red;');
-             toast.error("Database not available");
-             return;
+       console.log(`%cDEBUG: leaveActivityChat START - User: ${userId}, Activity: ${activityId}`, 'color: orange; font-weight: bold;');
+      try {
+        if (!realtimeDb) {
+          console.error('%cDEBUG: leaveActivityChat ERROR - Realtime Database not initialized', 'color: red;');
+          throw new Error('Chat service is unavailable - please try again later');
         }
 
-        try {
-            const memberRef = ref(db, `activity-chats/${activityId}/members/${userId}`);
-            await remove(memberRef);
-            console.log(`%cDEBUG: leaveActivityChat - User ${userId} removed from members of ${activityId}.`, 'color: #4CAF50;');
+        const memberRef = ref(realtimeDb, `activity-chats/${activityId}/members/${userId}`);
+        const memberSnapshot = await new Promise<DataSnapshot>((resolve, reject) => {
+            onValue(memberRef, resolve, reject, { onlyOnce: true });
+         });
 
-             // Optional: Add a system message indicating the user left
-            const messagesRef = ref(db, `chat-messages/${activityId}`);
-            const newMessageRef = push(messagesRef);
-            const timestamp = Date.now();
-            const leaveMessage = `${get().messageListeners[`chat_${activityId}`]?.userDisplayName || "A participant"} has left the chat.`; // Attempt to get display name or use generic
-             const messageData = {
-                senderId: "system",
-                senderName: "System",
-                text: leaveMessage,
-                timestamp
-            };
-            await set(newMessageRef, messageData);
-            console.log(`%cDEBUG: leaveActivityChat - Member leave system message added for ${activityId}.`, 'color: #4CAF50;');
+        const displayName = memberSnapshot.val()?.displayName || 'A participant';
 
-             // --- UPDATE LAST MESSAGE ON CHAT ENTRY ---
-            const chatRef = ref(db, `activity-chats/${activityId}`);
-            const chatEntryUpdates: any = {
-              lastMessageText: leaveMessage,
-              lastMessageSenderName: "System",
-              lastMessageTimestamp: timestamp
-            };
-            await update(chatRef, chatEntryUpdates);
-             console.log(`%cDEBUG: leaveActivityChat - Updated last message in activity-chats/${activityId} with system message.`, 'color: #4CAF50;');
-             // --- END UPDATE ---
+        await rtdbRemove(memberRef);
+        console.log(`%cDEBUG: leaveActivityChat - Removed member ${userId} from RTDB for ${activityId}.`, 'color: orange;');
 
-            console.log(`%cDEBUG: leaveActivityChat END - User ${userId} left chat ${activityId}`, 'color: #FF5722; font-weight: bold;');
 
-        } catch (error) {
-            console.error(`%cDEBUG: leaveActivityChat ERROR for ${activityId}:`, 'color: red;', error);
-            toast.error("Failed to leave chat");
-             throw error; // Re-throw
+        // Add system message about leaving
+        const messagesRef = ref(realtimeDb, `chat-messages/${activityId}`);
+        const newMessageRef = push(messagesRef);
+        await rtdbSet(newMessageRef, {
+          senderId: 'system',
+          senderName: 'System',
+          text: `${displayName} has left the chat.`,
+          timestamp: Date.now()
+        });
+        console.log(`%cDEBUG: leaveActivityChat - Added leave message for ${userId} in ${activityId}.`, 'color: orange;');
+
+        // If the user is currently viewing this chat, unsubscribe
+        if (get().currentChatId === activityId) {
+          console.log(`%cDEBUG: leaveActivityChat - User was viewing the chat they left (${activityId}), unsubscribing.`, 'color: orange;');
+          get().unsubscribeFromChat();
         }
+
+        console.log(`%cDEBUG: leaveActivityChat END - User ${userId} successfully left chat for activity ${activityId}`, 'color: orange; font-weight: bold;');
+      } catch (error) {
+        console.error('%cDEBUG: leaveActivityChat ERROR:', 'color: red;', error);
+        set({ error: error as Error });
+        throw error;
+      }
     },
 
-    // Send a message
-    sendMessage: async (activityId: string, user: User, text: string) => {
-        console.log(`%cDEBUG: sendMessage START - Activity: ${activityId}, User: ${user.uid}`, 'color: #03A9F4; font-weight: bold;');
-        if (!text.trim()) {
-            console.warn('%cDEBUG: sendMessage - Message text is empty or whitespace.', 'color: orange;');
-            return;
+    // Send a message to a chat
+    sendMessage: async (activityId: string, user: User, text: string): Promise<string | null | undefined> => {
+      const functionStartTime = Date.now(); // Debug: Start time
+      console.log(`[${new Date(functionStartTime).toISOString()}] %cDEBUG: sendMessage START - Activity: ${activityId}, User: ${user.uid}`, 'color: blue; font-weight: bold;');
+
+      const messageTimestamp = Date.now(); // Use a consistent JS timestamp (milliseconds)
+
+      try {
+        if (!activityId || !user || !text || !user.uid || text.trim().length === 0) {
+           console.error(`%cDEBUG: sendMessage ERROR - Invalid parameters`, 'color: red;', { activityId, userId: user?.uid, textProvided: !!text, textTrimmed: text?.trim() });
+          throw new Error('Invalid message parameters: Activity ID, user, and non-empty text are required.');
         }
 
         const db = realtimeDb;
-         if (!db) {
-             console.error('%cDEBUG: sendMessage ERROR - Realtime Database not available', 'color: red;');
-              toast.error("Database not available");
-             return;
+        if (!db) {
+          console.error('%cDEBUG: sendMessage ERROR - Realtime Database not initialized', 'color: red;');
+          throw new Error('Chat service unavailable - please reload the page');
         }
 
+        console.log(`%cDEBUG: sendMessage - Preparing RTDB write for Activity ${activityId}`, 'color: blue;');
+        const chatMessagesRef = ref(db, `chat-messages/${activityId}`);
+        const newMessageRef = push(chatMessagesRef); // Generate unique key locally
+
+        const messageData = {
+          senderId: user.uid,
+          senderName: user.displayName || 'Anonymous',
+          text: text.trim(),
+          timestamp: messageTimestamp // Use the consistent JS timestamp
+        };
+
+        await rtdbSet(newMessageRef, messageData);
+        const rtdbWriteEndTime = Date.now();
+        console.log(`%cDEBUG: sendMessage - RTDB write SUCCESS - Activity: ${activityId}, Message Key: ${newMessageRef.key}, Time taken: ${rtdbWriteEndTime - functionStartTime}ms`, 'color: green;');
+
+        // ----- Update Firestore lastMessageTimestamp -----
         try {
-            const messagesRef = ref(db, `chat-messages/${activityId}`);
-            const newMessageRef = push(messagesRef);
-            const timestamp = Date.now(); // Use JS timestamp
+          console.log(`%cDEBUG: sendMessage - Preparing Firestore update for Activity ${activityId}`, 'color: purple;');
+          const activityDocRef = doc(firestore, "activities", activityId);
+          // Convert JS timestamp (milliseconds) to Firestore Timestamp object
+          const firestoreTimestamp = FirestoreTimestamp.fromMillis(messageTimestamp);
 
-            const messageData = {
-                senderId: user.uid,
-                senderName: user.displayName || "Anonymous",
-                text: text.trim(),
-                timestamp: timestamp // Use JS timestamp
-            };
+          await updateDoc(activityDocRef, {
+            lastMessageTimestamp: firestoreTimestamp // Use Firestore Timestamp object
+          });
+          const firestoreUpdateEndTime = Date.now();
+          console.log(`%cDEBUG: sendMessage - Firestore update SUCCESS - Activity: ${activityId}, Timestamp: ${firestoreTimestamp.toDate().toISOString()}, Time taken: ${firestoreUpdateEndTime - rtdbWriteEndTime}ms`, 'color: darkgreen; font-weight: bold;');
 
-            await set(newMessageRef, messageData);
-            console.log(`%cDEBUG: sendMessage - Message sent and saved to chat-messages/${activityId}. Key: ${newMessageRef.key}`, 'color: #4CAF50;', messageData);
-
-            // --- UPDATE LAST MESSAGE ON CHAT ENTRY ---
-            const chatRef = ref(db, `activity-chats/${activityId}`);
-            const chatEntryUpdates: any = {
-              lastMessageText: text.trim(),
-              lastMessageSenderName: user.displayName || "Anonymous",
-              lastMessageTimestamp: timestamp // Use JS timestamp
-            };
-             await update(chatRef, chatEntryUpdates);
-             console.log(`%cDEBUG: sendMessage - Updated last message in activity-chats/${activityId}.`, 'color: #4CAF50;', chatEntryUpdates);
-            // --- END UPDATE ---
-
-             console.log(`%cDEBUG: sendMessage END - Message sent and last message updated for ${activityId}`, 'color: #03A9F4; font-weight: bold;');
-            return newMessageRef.key; // Return the message ID
-        } catch (error) {
-            console.error(`%cDEBUG: sendMessage ERROR for ${activityId}:`, 'color: red;', error);
-            toast.error("Failed to send message");
-            set({ error: error as Error }); // Set error state
-            throw error; // Re-throw to allow component to handle sending state
+        } catch (firestoreError) {
+           console.error(`%cDEBUG: sendMessage ERROR - Failed to update Firestore 'lastMessageTimestamp' for Activity ${activityId}`, 'color: red;', firestoreError);
+           // Log the error but don't prevent the message from being considered "sent" in RTDB
+           toast.error("Failed to update chat order timestamp. Message sent.", { description: firestoreError instanceof Error ? firestoreError.message : String(firestoreError) });
         }
+        // ----- END Firestore Update -----
+
+
+        // Cleanup expired messages (keep this)
+        try {
+          const cleanupStartTime = Date.now();
+          const deletedCount = await get().cleanupExpiredMessages(activityId);
+          const cleanupEndTime = Date.now();
+          if (deletedCount > 0) {
+            console.log(`%cDEBUG: sendMessage - Cleanup SUCCESS - Deleted ${deletedCount} expired messages. Time taken: ${cleanupEndTime - cleanupStartTime}ms`, 'color: orange;');
+          } else {
+             console.log(`%cDEBUG: sendMessage - Cleanup INFO - No expired messages to delete. Time taken: ${cleanupEndTime - cleanupStartTime}ms`, 'color: gray;');
+          }
+        } catch (cleanupError) {
+          console.error('%cDEBUG: sendMessage ERROR - Failed during cleanup after sending message', 'color: red;', cleanupError);
+        }
+        const functionEndTime = Date.now();
+        console.log(`[${new Date(functionEndTime).toISOString()}] %cDEBUG: sendMessage END - Activity: ${activityId}. Total time: ${functionEndTime - functionStartTime}ms`, 'color: blue; font-weight: bold;');
+
+
+        return newMessageRef.key; // Return the key of the new message in RTDB
+      } catch (error) {
+        const errorEndTime = Date.now();
+        console.error(`[${new Date(errorEndTime).toISOString()}] %cDEBUG: sendMessage FATAL ERROR - Activity: ${activityId}`, 'color: red; font-weight: bold;', error);
+        set({ error: error as Error });
+        toast.error("Failed to send message.", { description: error instanceof Error ? error.message : String(error) });
+        throw error; // Re-throw the error so the calling component knows it failed
+      }
     },
 
-    // Cleanup expired messages (example logic - not fully implemented for specific expiry rules)
-    cleanupExpiredMessages: async (activityId: string) => {
-        console.log(`%cDEBUG: cleanupExpiredMessages START - Activity: ${activityId}`, 'color: #FF9800; font-weight: bold;');
-         const db = realtimeDb;
-         if (!db) {
+    // Clean up expired messages (e.g., older than 5 days)
+    cleanupExpiredMessages: async (activityId: string): Promise<number> => {
+      const cleanupStartTime = Date.now();
+      try {
+        // Keep messages for 5 days (adjust as needed)
+        const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
+        const expirationTimestamp = Date.now() - FIVE_DAYS_MS; // JS Timestamp (milliseconds)
+
+        console.log(`%cDEBUG: cleanupExpiredMessages START - Activity: ${activityId}. Cleaning messages older than ${new Date(expirationTimestamp).toISOString()}`, 'color: #FF5722;');
+
+        const db = realtimeDb;
+        if (!db) {
             console.error('%cDEBUG: cleanupExpiredMessages ERROR - Realtime Database not available', 'color: red;');
-             return 0;
-         }
+            throw new Error('Realtime Database not available');
+        }
 
-         // Example: Remove messages older than 30 days (adjust as needed)
-         const expiryThreshold = Date.now() - (30 * 24 * 60 * 60 * 1000); // 30 days ago in milliseconds
+        const messagesRef = ref(db, `chat-messages/${activityId}`);
+        // Query for messages older than the expiration timestamp
+        const queryToCleanup = query(messagesRef, orderByChild('timestamp'), endAt(expirationTimestamp));
 
-        try {
-             const messagesRef = ref(db, `chat-messages/${activityId}`);
-             // Query for messages with timestamp less than the expiry threshold
-             const expiredMessagesQuery = query(messagesRef, orderByChild('timestamp'), endAt(expiryThreshold));
+        const snapshot = await new Promise<DataSnapshot>((resolve, reject) => {
+           onValue(queryToCleanup, resolve, reject, { onlyOnce: true });
+        });
 
-             const snapshot = await new Promise<DataSnapshot>((resolve, reject) => {
-                onValue(expiredMessagesQuery, resolve, reject, { onlyOnce: true });
-             });
+        if (!snapshot.exists()) {
+          console.log(`%cDEBUG: cleanupExpiredMessages - No messages older than expiration found for ${activityId}.`, 'color: gray;');
+          return 0; // No messages to delete
+        }
 
-             const messagesToDelete = snapshot.val();
-             let deletedCount = 0;
+        const messagesToDelete: Record<string, any> = snapshot.val();
+        const messageKeysToDelete = Object.keys(messagesToDelete);
+        console.log(`%cDEBUG: cleanupExpiredMessages - Found ${messageKeysToDelete.length} expired messages to delete for ${activityId}.`, 'color: #FF5722;');
 
-             if (messagesToDelete) {
-                 const updates: { [key: string]: null } = {};
-                 Object.keys(messagesToDelete).forEach(key => {
-                     updates[key] = null; // Set to null to delete
-                     deletedCount++;
-                 });
-
-                 console.log(`%cDEBUG: cleanupExpiredMessages - Found ${deletedCount} messages older than ${new Date(expiryThreshold).toISOString()} for ${activityId}. Deleting...`, 'color: #FF9800;');
-
-                 await update(messagesRef, updates);
-                 console.log(`%cDEBUG: cleanupExpiredMessages - Deleted ${deletedCount} messages for ${activityId}.`, 'color: #4CAF50;');
-
-                 // Note: Deleting messages *might* require recalculating the `lastMessage` on the activity-chats node
-                 // if the last message happened to be one of the deleted ones. This complexity is omitted for this basic example.
-                 // A robust solution might re-query the latest message after deletion or use Cloud Functions.
-
-             } else {
-                 console.log(`%cDEBUG: cleanupExpiredMessages - No expired messages found for ${activityId}.`, 'color: gray;');
-             }
-
-             console.log(`%cDEBUG: cleanupExpiredMessages END - Cleanup complete for ${activityId}. Deleted: ${deletedCount}`, 'color: #FF9800; font-weight: bold;');
-            return deletedCount;
-
-        } catch (error) {
-             console.error(`%cDEBUG: cleanupExpiredMessages ERROR for ${activityId}:`, 'color: red;', error);
-             // Do not set global error for cleanup
+        if (messageKeysToDelete.length === 0) {
             return 0;
         }
-    }
-  };
 
-  // Return the store object
+        // Prepare updates for atomic removal
+        const updates: Record<string, null> = {};
+        messageKeysToDelete.forEach(key => {
+          updates[`chat-messages/${activityId}/${key}`] = null; // Setting to null deletes the key
+        });
+
+        // Use update for atomic removal of multiple keys at once
+        await rtdbUpdate(ref(db), updates);
+
+        const cleanupEndTime = Date.now();
+        console.log(`%cDEBUG: cleanupExpiredMessages END - Successfully deleted ${messageKeysToDelete.length} messages for ${activityId}. Time taken: ${cleanupEndTime - cleanupStartTime}ms`, 'color: #FF5722; font-weight: bold;');
+        return messageKeysToDelete.length;
+
+      } catch (error) {
+        console.error(`%cDEBUG: cleanupExpiredMessages ERROR - Failed to clean up messages for ${activityId}:`, 'color: red;', error);
+        set({ error: error as Error }); // Set error state but don't necessarily throw
+        return 0; // Return 0 as cleanup failed
+      }
+    }
+  }; // End store object definition
+
+  console.log('%cDEBUG: Creating chat store instance.', 'background: #3f51b5; color: white; padding: 2px 4px; border-radius: 2px;');
   return store;
-});
+}); // End create

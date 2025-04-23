@@ -1,12 +1,14 @@
 import functools
 from http import HTTPStatus
-from typing import Annotated, Callable
+from typing import Callable
+from typing_extensions import Annotated
 import jwt
 from fastapi import Depends, HTTPException, WebSocket, WebSocketException, status
 from fastapi.requests import HTTPConnection
 from jwt import PyJWKClient
 from pydantic import BaseModel
 from starlette.requests import Request
+
 
 
 class AuthConfig(BaseModel):

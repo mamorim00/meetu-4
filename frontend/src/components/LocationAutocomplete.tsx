@@ -33,8 +33,8 @@ export default function LocationAutocomplete({
   });
 
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const autocompleteRef = useRef<google.maps.places.Autocomplete>();
-
+  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  
   useEffect(() => {
     if (!isLoaded || !inputRef.current) return;
 
