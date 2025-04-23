@@ -1,33 +1,33 @@
-import { useEffect } from "react";
-import { MessageEmitter } from "../dev-components/Beacon";
-import { InternalErrorBoundary } from "../dev-components/InternalErrorBoundary";
-import { UserErrorBoundary } from "../dev-components/UserErrorBoundary";
+// src/internal-components/DevTools.tsx
+import React, { useEffect } from "react";
 
-interface Props {
+let MessageEmitter: React.FC<any> = ({ children }) => <>{children}</>;
+let InternalErrorBoundary: React.FC<any> = ({ children }) => <>{children}</>;
+let UserErrorBoundary: React.FC<any> = ({ children }) => <>{children}</>;
+
+if (process.env.NODE_ENV === "development") {
+  // dynamic require so TS only tries to resolve these in dev
+  // @ts-ignore
+  MessageEmitter = require("../dev-components/Beacon").MessageEmitter;
+  // @ts-ignore
+  InternalErrorBoundary = require("../dev-components/InternalErrorBoundary").InternalErrorBoundary;
+  // @ts-ignore
+  UserErrorBoundary = require("../dev-components/UserErrorBoundary").UserErrorBoundary;
+}
+
+export const DevTools: React.FC<{
   children: React.ReactNode;
   shouldRender: boolean;
-}
-
-function logReason(event: PromiseRejectionEvent) {
-  console.error(event?.reason);
-}
-
-/**
- * Render extra dev tools around the app when in dev mode,
- * but only render the app itself in prod mode
- */
-export const DevTools = ({ children, shouldRender }: Props) => {
+}> = ({ children, shouldRender }) => {
   useEffect(() => {
-    if (shouldRender) {
+    if (shouldRender && process.env.NODE_ENV === "development") {
+      const logReason = (e: PromiseRejectionEvent) => console.error(e.reason);
       window.addEventListener("unhandledrejection", logReason);
-
-      return () => {
-        window.removeEventListener("unhandledrejection", logReason);
-      };
+      return () => window.removeEventListener("unhandledrejection", logReason);
     }
   }, [shouldRender]);
 
-  if (shouldRender) {
+  if (shouldRender && process.env.NODE_ENV === "development") {
     return (
       <InternalErrorBoundary>
         <UserErrorBoundary>
@@ -36,6 +36,5 @@ export const DevTools = ({ children, shouldRender }: Props) => {
       </InternalErrorBoundary>
     );
   }
-
   return <>{children}</>;
 };

@@ -1,17 +1,39 @@
+// src/components/ActivityCard.tsx
+
 import React from "react";
 import { formatDistanceToNow } from "date-fns";
-import { CalendarIcon, MapPinIcon, UsersIcon, Lock, Globe, UserPlus, ExternalLink, MessageSquare } from "lucide-react";
+import {
+  CalendarIcon,
+  MapPinIcon,
+  UsersIcon,
+  Lock,
+  Globe,
+  UserPlus,
+  ExternalLink,
+  MessageSquare,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Activity, useActivityStore } from "../utils/activityStore";
 import { useUserGuardContext } from "app";
 import { toast } from "sonner";
 import { useFriendsStore } from "../utils/friendsStore";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useNavigate } from "react-router-dom";
-import { Timestamp } from 'firebase/firestore';
-
+import { Timestamp } from "firebase/firestore";
 
 interface Props {
   activity: Activity;
@@ -25,99 +47,78 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
   const [joining, setJoining] = React.useState(false);
   const [leaving, setLeaving] = React.useState(false);
   const [sendingRequest, setSendingRequest] = React.useState(false);
-  
-  // Check if current user is a participant
+
   const userIsParticipant = isParticipant(activity.id, user.uid);
   const userIsCreator = activity.createdBy.userId === user.uid;
-  
-  // Check if creator is a friend of the current user
   const creatorIsFriend = isFriend(activity.createdBy.userId);
-  
-  // Determine if the user can join the activity
-  const canJoinActivity = activity.isPublic !== false || userIsCreator || creatorIsFriend;
-  
-  // Handle sending friend request
+  const canJoinActivity =
+    activity.isPublic !== false || userIsCreator || creatorIsFriend;
+
   const handleSendFriendRequest = async () => {
     if (sendingRequest) return;
-    
     try {
       setSendingRequest(true);
       await sendFriendRequest(user, activity.createdBy.userId);
       toast.success(`Friend request sent to ${activity.createdBy.displayName}!`);
     } catch (error) {
-      console.error("Error sending friend request:", error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to send friend request";
-      toast.error(errorMessage);
+      console.error(error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to send friend request"
+      );
     } finally {
       setSendingRequest(false);
     }
   };
-  
-  
-  // Handle joining activity
+
   const handleJoin = async () => {
     if (joining) return;
-    
     try {
       setJoining(true);
       await joinActivity(activity.id, user.uid);
       toast.success("You have joined the activity!");
     } catch (error) {
-      console.error("Error joining activity:", error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to join activity";
-      toast.error(errorMessage);
+      console.error(error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to join activity"
+      );
     } finally {
       setJoining(false);
     }
   };
-  
-  // Handle leaving activity
+
   const handleLeave = async () => {
     if (leaving) return;
-    
     try {
       setLeaving(true);
       await leaveActivity(activity.id, user.uid);
       toast.success("You have left the activity");
     } catch (error) {
-      console.error("Error leaving activity:", error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to leave activity";
-      toast.error(errorMessage);
+      console.error(error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to leave activity"
+      );
     } finally {
       setLeaving(false);
     }
   };
 
-  let dateObject: Date;
-
-  if (activity.dateTime instanceof Timestamp) {
-    // If it's a Firebase Timestamp, convert it to a JS Date object
-    dateObject = activity.dateTime.toDate();
-  } else {
-    // If it's a string or number, pass it to the Date constructor
-    // new Date() can parse standard date strings and numeric timestamps
-    dateObject = new Date(activity.dateTime);
-  }
-  
-  // Now use the native Date object (dateObject) to format the date
+  // Convert dateTime
+  const dateObject =
+    activity.dateTime instanceof Timestamp
+      ? activity.dateTime.toDate()
+      : new Date(activity.dateTime);
   const formattedDate = dateObject.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
-  
-  // Use the native Date object (dateObject) to format the time
   const formattedTime = dateObject.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   });
-  
-  // Use the native Date object (dateObject) to calculate how long until the event
   const timeUntil = formatDistanceToNow(dateObject, { addSuffix: true });
-  
 
-  // Get category color class based on category
   const getCategoryColorClass = (category: string) => {
     switch (category) {
       case "Sports":
@@ -141,40 +142,64 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
     }
   };
 
-  // Navigate to activity details page
-  const viewActivityDetails = () => {
+  const categoryBorder = (() => {
+    switch (activity.category) {
+      case "Sports":
+        return "border-primary/30";
+      case "Dining":
+        return "border-secondary/30";
+      case "Hiking":
+        return "border-accent/30";
+      case "Gaming":
+        return "border-muted/30";
+      case "Movies":
+        return "border-secondary/30";
+      case "Travel":
+        return "border-primary/30";
+      case "Music":
+        return "border-muted/30";
+      case "Cooking":
+        return "border-accent/30";
+      default:
+        return "border-primary/30";
+    }
+  })();
+
+  const viewActivityDetails = () =>
     navigate(`/activity-details?id=${activity.id}`);
-  };
-  
+
   return (
-    <Card 
-      className={`overflow-hidden hover:shadow-md transition-all duration-300 flex flex-col h-full rounded-3xl cursor-pointer ${activity.category === "Sports" ? "border-primary/30" : 
-                activity.category === "Dining" ? "border-secondary/30" :
-                activity.category === "Hiking" ? "border-accent/30" :
-                activity.category === "Gaming" ? "border-muted/30" :
-                activity.category === "Movies" ? "border-secondary/30" :
-                activity.category === "Travel" ? "border-primary/30" :
-                activity.category === "Music" ? "border-muted/30" :
-                activity.category === "Cooking" ? "border-accent/30" : "border-primary/30"}`} 
-      style={{ borderWidth: '2px' }}
+    <Card
+      className={`
+        w-full min-w-0 flex flex-col h-full rounded-3xl
+        overflow-hidden hover:shadow-md transition-all duration-300
+        cursor-pointer border-2 ${categoryBorder}
+      `}
       onClick={viewActivityDetails}
     >
+      {/* Category Badge */}
       <div className="flex justify-end pt-4 px-4">
-        <Badge className={`${getCategoryColorClass(activity.category)}`}>
+        <Badge className={getCategoryColorClass(activity.category)}>
           {activity.category}
         </Badge>
       </div>
-      
+
+      {/* Title & Public/Private */}
       <CardHeader className="p-4 pb-0">
-        <div className="flex justify-between items-start">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-xl">{activity.title}</CardTitle>
-            <ExternalLink className="h-4 w-4 text-muted-foreground" />
+        <div className="flex items-center justify-between w-full min-w-0">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <CardTitle className="text-xl truncate flex-1">
+              {activity.title}
+            </CardTitle>
+            <ExternalLink className="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </div>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge variant="outline" className="ml-2 flex gap-1 items-center">
+                <Badge
+                  variant="outline"
+                  className="ml-2 flex gap-1 items-center flex-shrink-0"
+                >
                   {activity.isPublic !== false ? (
                     <>
                       <Globe className="h-3 w-3" />
@@ -189,21 +214,27 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
                 </Badge>
               </TooltipTrigger>
               <TooltipContent>
-                {activity.isPublic !== false 
-                  ? "Anyone can see this activity" 
+                {activity.isPublic !== false
+                  ? "Anyone can see this activity"
                   : "Only the creator and their friends can see this activity"}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
-        <CardDescription className="text-sm mt-1 flex items-center justify-between">
-          <span>Created by {activity.createdBy.displayName || activity.createdBy.userId.substring(0, 5) || 'Unknown User'}</span>
+
+        <CardDescription className="mt-1 flex items-center justify-between text-sm w-full min-w-0">
+          <span className="truncate">
+            Created by {activity.createdBy.displayName ?? "Unknown User"}
+          </span>
           {!userIsCreator && !creatorIsFriend && activity.isPublic === false && (
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="text-xs h-7 px-2"
-              onClick={handleSendFriendRequest}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs h-7 px-2 flex-shrink-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSendFriendRequest();
+              }}
               disabled={sendingRequest}
             >
               <UserPlus className="h-3 w-3 mr-1" />
@@ -212,42 +243,46 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
           )}
         </CardDescription>
       </CardHeader>
-      
-      <CardContent className="p-4 flex-grow">
-        <p className="text-sm text-muted-foreground mb-4">{activity.description}</p>
-        
+
+      {/* Description & Meta */}
+      <CardContent className="p-4 flex-grow flex flex-col">
+        <p className="text-sm text-muted-foreground mb-4 line-clamp-3">
+          {activity.description}
+        </p>
         <div className="space-y-2">
-          <div className="flex items-center text-sm">
-            <CalendarIcon className="mr-2 h-4 w-4 text-muted-foreground" />
-            <span>{formattedDate} at {formattedTime}</span>
+          <div className="flex items-center text-sm gap-2">
+            <CalendarIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <span className="truncate">{`${formattedDate} at ${formattedTime}`}</span>
           </div>
-          
-          <div className="flex items-center text-sm">
-            <MapPinIcon className="mr-2 h-4 w-4 text-muted-foreground" />
-            <span>{activity.location}</span>
+          <div className="flex items-center text-sm gap-2">
+            <MapPinIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <span className="truncate">{activity.location}</span>
           </div>
-          
-          <div className="flex items-center text-sm">
-            <UsersIcon className="mr-2 h-4 w-4 text-muted-foreground" />
-            <span>{activity.participantIds.length} participants</span>
+          <div className="flex items-center text-sm gap-2">
+            <UsersIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <span>
+              {activity.participantIds.length} participant
+              {activity.participantIds.length !== 1 && "s"}
+            </span>
             {activity.maxParticipants && (
-              <span className="text-muted-foreground"> (max {activity.maxParticipants})</span>
+              <span className="text-muted-foreground">
+                (max {activity.maxParticipants})
+              </span>
             )}
           </div>
-          
-         
         </div>
       </CardContent>
-      
-      <CardFooter className="p-4 pt-0 flex justify-between items-center">
-        <div className="flex items-center gap-2">
-          <p className="text-xs text-muted-foreground">{timeUntil}</p>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            className="p-0 h-auto text-xs text-primary"
+
+      {/* Footer: Time until + Join/Leave */}
+      <CardFooter className="p-4 pt-0 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>{timeUntil}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="p-0 h-auto text-xs text-primary flex-shrink-0"
             onClick={(e) => {
-              e.stopPropagation(); // Prevent card click propagation
+              e.stopPropagation();
               viewActivityDetails();
             }}
           >
@@ -255,30 +290,43 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
           </Button>
         </div>
         {userIsParticipant ? (
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="rounded-full bg-red-100 hover:bg-red-200 text-red-600 border-red-200"
-            onClick={handleLeave}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleLeave();
+            }}
             disabled={leaving}
           >
             {leaving ? "Leaving..." : "Leave Activity"}
           </Button>
         ) : canJoinActivity ? (
-          <Button 
+          <Button
             className="rounded-full"
-            onClick={handleJoin}
-            disabled={joining || (activity.maxParticipants && activity.participantIds.length >= activity.maxParticipants)}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleJoin();
+            }}
+            disabled={
+              joining ||
+              (!!activity.maxParticipants &&
+                activity.participantIds.length >= activity.maxParticipants)
+            }
           >
-            {joining ? "Joining..." : (activity.maxParticipants && activity.participantIds.length >= activity.maxParticipants) 
-              ? "Activity Full" 
+            {joining
+              ? "Joining..."
+              : activity.maxParticipants &&
+                activity.participantIds.length >= activity.maxParticipants
+              ? "Activity Full"
               : "Join Activity"}
           </Button>
         ) : (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button 
-                  className="rounded-full" 
+                <Button
+                  className="rounded-full"
                   variant="secondary"
                   disabled
                 >
@@ -295,9 +343,3 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
     </Card>
   );
 };
-
-
-
-
-
-

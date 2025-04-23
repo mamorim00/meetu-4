@@ -6,7 +6,7 @@ import { ArrowLeft } from "lucide-react";
 import { Toaster } from "sonner";
 import { toast } from "sonner";
 import { firebaseAuth } from "app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, updateProfile, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,7 +60,7 @@ export default function Login() {
         const userCredential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
         // Update user profile with display name
         if (userCredential.user) {
-          await userCredential.user.updateProfile({
+          await updateProfile(userCredential.user, {
             displayName: displayName
           });
           console.log("User profile updated with display name:", displayName);

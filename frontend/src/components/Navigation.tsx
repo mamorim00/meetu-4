@@ -180,7 +180,7 @@ export const Navigation: React.FC<NavigationProps> = () => {
                 
                 <nav className="flex flex-col space-y-1">
                   {navItems.map((item) => (
-                    (item.showAlways || (item.requireAuth && user)) && (
+                    (item.showWhenLoggedOut || (item.requireAuth && user)) && (
                       <Button
                         key={item.path}
                         variant={location.pathname === item.path ? "default" : "ghost"}

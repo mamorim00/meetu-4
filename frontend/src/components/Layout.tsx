@@ -2,6 +2,7 @@ import React from "react";
 import { Navigation } from "./Navigation";
 
 interface LayoutProps {
+  hideNav?: boolean; 
   children: React.ReactNode;
   /** Optional title shown at the top of the content area */
   title?: string;
