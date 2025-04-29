@@ -10,6 +10,7 @@ import {
   deleteDoc,
   onSnapshot,
   query,
+  where,
   orderBy,
   arrayUnion,
   arrayRemove,
@@ -75,8 +76,11 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ isLoading: true, error: null });
     // Adjust query based on userId/showFriendsOnly if needed later
     // For now, keeping the original query logic
-    const q = query(collection(db, 'activities'), orderBy('dateTime')); // Still orders by original dateTime
-
+    const q = query(
+      collection(db, 'activities'),
+      where('isPublic', '==', true),
+      orderBy('dateTime')
+    );
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
@@ -240,34 +244,43 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   // --- Leave Activity ---
   leaveActivity: async (activityId, userId) => {
-      console.log(`%cDEBUG: activityStore.leaveActivity - User: ${userId}, Activity: ${activityId}`, 'color: orange;');
+    console.log(`%cDEBUG: activityStore.leaveActivity - User: ${userId}, Activity: ${activityId}`, 'color: orange;');
     try {
       if (!activityId || !userId) {
         throw new Error('Activity ID and user ID are required');
       }
-
+  
       const activityRef = doc(db, 'activities', activityId);
-      // Check if user is creator first (optional, based on your app logic)
-      // const activityDoc = await getDoc(activityRef);
-      // if (activityDoc.exists() && activityDoc.data()?.createdBy?.userId === userId) { ... }
-
-      // Atomically remove user ID if present
+      const activityDoc = await getDoc(activityRef);
+  
+      if (!activityDoc.exists()) {
+        console.warn(`%cDEBUG: activityStore.leaveActivity - Activity ${activityId} not found.`, 'color: orange;');
+        throw new Error('Activity not found');
+      }
+  
+      const activityData = activityDoc.data();
+  
+      // 🛑 Prevent creator from leaving their own activity
+      if (activityData?.createdBy?.userId === userId) {
+        console.error(`%cDEBUG: activityStore.leaveActivity - Creator ${userId} cannot leave their own activity ${activityId}.`, 'color: red;');
+        throw new Error('You cannot leave an activity you created.');
+      }
+  
+      // Atomically remove user ID
       await updateDoc(activityRef, {
         participantIds: arrayRemove(userId),
       });
-       console.log(`%cDEBUG: activityStore.leaveActivity - Firestore updated for ${activityId}.`, 'color: orange;');
-
-
+      console.log(`%cDEBUG: activityStore.leaveActivity - Firestore updated for ${activityId}.`, 'color: orange;');
+  
       // Leave the activity chat using the chatStore
       try {
         console.log(`%cDEBUG: activityStore.leaveActivity - Calling chatStore.leaveActivityChat for ${activityId}.`, 'color: orange;');
         await useChatStore.getState().leaveActivityChat(activityId, userId);
-         console.log(`%cDEBUG: activityStore.leaveActivity - chatStore.leaveActivityChat completed for ${activityId}.`, 'color: green;');
+        console.log(`%cDEBUG: activityStore.leaveActivity - chatStore.leaveActivityChat completed for ${activityId}.`, 'color: green;');
       } catch (chatError) {
         console.error('%cDEBUG: activityStore.leaveActivity - Error calling leaveActivityChat, continuing leave operation:', 'color: red;', chatError);
-        // Log error but don't stop the activity leave process
       }
-
+  
       console.log(`User ${userId} left activity ${activityId}`);
     } catch (error) {
       console.error(`%cDEBUG: activityStore.leaveActivity - Error leaving activity ${activityId}:`, 'color: red;', error);

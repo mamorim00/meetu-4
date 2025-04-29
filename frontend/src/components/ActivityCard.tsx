@@ -275,71 +275,71 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
 
       {/* Footer: Time until + Join/Leave */}
       <CardFooter className="p-4 pt-0 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>{timeUntil}</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="p-0 h-auto text-xs text-primary flex-shrink-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              viewActivityDetails();
-            }}
-          >
-            View details
-          </Button>
-        </div>
-        {userIsParticipant ? (
-          <Button
-            variant="outline"
-            className="rounded-full bg-red-100 hover:bg-red-200 text-red-600 border-red-200"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleLeave();
-            }}
-            disabled={leaving}
-          >
-            {leaving ? "Leaving..." : "Leave Activity"}
-          </Button>
-        ) : canJoinActivity ? (
-          <Button
-            className="rounded-full"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleJoin();
-            }}
-            disabled={
-              joining ||
-              (!!activity.maxParticipants &&
-                activity.participantIds.length >= activity.maxParticipants)
-            }
-          >
-            {joining
-              ? "Joining..."
-              : activity.maxParticipants &&
-                activity.participantIds.length >= activity.maxParticipants
-              ? "Activity Full"
-              : "Join Activity"}
-          </Button>
-        ) : (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  className="rounded-full"
-                  variant="secondary"
-                  disabled
-                >
-                  Private Activity
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                This activity is only visible to friends of the creator
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
-      </CardFooter>
-    </Card>
-  );
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span>{timeUntil}</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="p-0 h-auto text-xs text-primary flex-shrink-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            viewActivityDetails();
+          }}
+        >
+          View details
+        </Button>
+      </div>
+      {userIsParticipant ? (
+        <Button
+          variant="outline"
+          className="rounded-full bg-red-100 hover:bg-red-200 text-red-600 border-red-200"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleLeave();
+          }}
+          disabled={leaving}
+        >
+          {leaving ? "Leaving..." : "Leave Activity"}
+        </Button>
+      ) : canJoinActivity ? (
+        <Button
+          className="rounded-full"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleJoin();
+          }}
+          disabled={
+            joining ||
+            (!!activity.maxParticipants &&
+              activity.participantIds.length >= activity.maxParticipants)
+          }
+        >
+          {joining
+            ? "Joining..."
+            : activity.maxParticipants &&
+              activity.participantIds.length >= activity.maxParticipants
+            ? "Activity Full"
+            : "Join Activity"}
+        </Button>
+      ) : (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                className="rounded-full"
+                variant="secondary"
+                disabled
+              >
+                Private Activity
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              This activity is only visible to friends of the creator
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+    </CardFooter>
+  </Card>
+);
 };

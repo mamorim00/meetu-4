@@ -25,7 +25,9 @@ export const Layout: React.FC<LayoutProps> = ({
       <Navigation />
 
       {/* Main Content Area with padding for desktop nav */}
-      <div className="md:ml-64 flex-1 flex flex-col w-[calc(100%-16rem)]"> {/* Add margin and constrain width to prevent overlap */}
+      <div className="flex-1 flex flex-col
+                w-full max-w-[50rem] mx-auto
+                 md:ml-64 md:w-[calc(100%-16rem)] md:max-w-none"> {/* Add margin and constrain width to prevent overlap */}
         {/* Main Content */}
         <main className={`flex-grow pb-20 md:pb-8 ${contentClassName}`}>
           {title && (
