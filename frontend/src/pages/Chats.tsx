@@ -42,104 +42,90 @@ export default function Chats() {
   })); // Select only needed parts
 
   useEffect(() => {
-    // Abort controller for cleanup
+    // Don’t start anything until auth has resolved.
+    // useUserGuardContext should set `user` to `null` (no user) or a User object.
+    // If it’s still `undefined`, exit early.
+    if (user === undefined) {
+      console.log('%cDEBUG: Chats.tsx useEffect - Auth not yet initialized. Skipping fetch.', 'color: gray;');
+      return;
+    }
+
+    // Now we know auth is initialized (either signed out or in).
+    // If _signed out_, bail without error:
+    if (user === null) {
+      console.log('%cDEBUG: Chats.tsx useEffect - User is signed out. Clearing list.', 'color: orange;');
+      setActivities([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    // At this point, user is a valid User
     const controller = new AbortController();
     const signal = controller.signal;
 
     const fetchActivities = async () => {
-      console.log('%cDEBUG: Chats.tsx useEffect - Fetching activities START', 'color: magenta; font-weight: bold;');
+      console.log('%cDEBUG: Chats.tsx useEffect - Fetching activities for', user.uid, 'START', 'color: magenta; font-weight: bold;');
+      setLoading(true);
+      setError(null);
+
       try {
-        if (!user) {
-          console.log('%cDEBUG: Chats.tsx useEffect - No user found, skipping fetch.', 'color: orange;');
-          setLoading(false); // Stop loading if no user
-          setActivities([]); // Clear activities if no user
-          return;
-        }
-
-        console.log(`%cDEBUG: Chats.tsx useEffect - User found: ${user.uid}. Proceeding with fetch.`, 'color: magenta;');
-        setLoading(true);
-        setError(null);
-
         const activitiesRef = collection(firestore, "activities");
-
-        // ----- Query Firestore ordered by lastMessageTimestamp -----
-        console.log('%cDEBUG: Chats.tsx useEffect - Constructing Firestore query with orderBy("lastMessageTimestamp", "desc")', 'color: magenta;');
         const activitiesQuery = query(
           activitiesRef,
           where("participantIds", "array-contains", user.uid),
-          // Order by the timestamp field, descending (newest first)
-          // Firestore handles documents without this field based on query constraints (usually last)
           orderBy("lastMessageTimestamp", "desc")
         );
-        // ----- END Query -----
 
         const querySnapshot = await getDocs(activitiesQuery);
 
-        // Check if the fetch was aborted (component unmounted)
-         if (signal.aborted) {
-            console.log('%cDEBUG: Chats.tsx useEffect - Fetch aborted.', 'color: orange;');
-            return;
+        if (signal.aborted) {
+          console.log('%cDEBUG: Chats.tsx useEffect - Fetch aborted mid-flight.', 'color: orange;');
+          return;
         }
 
-        console.log(`%cDEBUG: Chats.tsx useEffect - Firestore query executed. Found ${querySnapshot.size} documents.`, 'color: magenta;');
+        console.log(`%cDEBUG: Chats.tsx useEffect - Query returned ${querySnapshot.size} docs.`, 'color: magenta;');
 
-        const fetchedActivities: Activity[] = [];
-        querySnapshot.forEach((doc) => {
-           const data = doc.data();
-           // --- Debugging Timestamp & Data ---
-           const lastMessageTs = data.lastMessageTimestamp;
-           const activityDateTs = data.dateTime;
-           console.log(`%cDEBUG: Chats.tsx useEffect - Activity Doc (ID: ${doc.id}): `, 'color: gray;', {
-                title: data.title,
-                lastMsgTS: lastMessageTs instanceof FirestoreTimestamp ? lastMessageTs.toDate().toISOString() : lastMessageTs, // Display as ISO string or raw value
-                dateTimeTS: activityDateTs instanceof FirestoreTimestamp ? activityDateTs.toDate().toISOString() : activityDateTs,
-                participantCount: data.participantIds?.length ?? 0,
-                location: data.location ?? 'N/A'
-           });
-           // --- End Debugging ---
-
-          // Construct the activity object matching the interface
-          fetchedActivities.push({
-              id: doc.id,
-              title: data.title || "Untitled Activity", // Provide defaults
-              participantIds: data.participantIds || [],
-              dateTime: data.dateTime, // Keep as Firestore Timestamp or whatever it is
-              location: data.location,
-              lastMessageTimestamp: data.lastMessageTimestamp, // Keep as Firestore Timestamp
-              // Add other fields from data as needed, matching the Activity interface
+        const fetched: Activity[] = [];
+        querySnapshot.forEach(doc => {
+          const d = doc.data();
+          fetched.push({
+            id: doc.id,
+            title: d.title || "Untitled Activity",
+            participantIds: d.participantIds || [],
+            dateTime: d.dateTime,
+            location: d.location,
+            lastMessageTimestamp: d.lastMessageTimestamp,
           });
         });
 
-        console.log('%cDEBUG: Chats.tsx useEffect - Setting activities state with data ordered by Firestore.', 'color: magenta;', fetchedActivities.map(a => ({id: a.id, title: a.title, lastMsg: a.lastMessageTimestamp?.toDate().toISOString() ?? null })));
-        setActivities(fetchedActivities);
-
-      } catch (err) {
-         if (signal.aborted) {
-            console.log('%cDEBUG: Chats.tsx useEffect - Fetch aborted during error handling.', 'color: orange;');
-            return;
-         }
-        console.error("%cDEBUG: Chats.tsx useEffect - Error fetching activities:", 'color: red;', err);
-        // Avoid setting error state if it's an AbortError
-         if ((err as Error).name !== 'AbortError') {
-            setError(err instanceof Error ? err : new Error("Unknown error fetching activities"));
-         }
+        setActivities(fetched);
+      } catch (err: any) {
+        // If permission denied because auth not ready, just skip
+        if (err.code === 'permission-denied') {
+          console.warn('%cDEBUG: Chats.tsx useEffect - Permission denied while fetching; will retry on next auth change.', 'color: orange;');
+        } else if (signal.aborted) {
+          console.log('%cDEBUG: Chats.tsx useEffect - Aborted with error.', 'color: orange;');
+        } else {
+          console.error('%cDEBUG: Chats.tsx useEffect - Unexpected error:', 'color: red;', err);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
       } finally {
-         if (!signal.aborted) {
-             console.log('%cDEBUG: Chats.tsx useEffect - Fetching activities END. Setting loading to false.', 'color: magenta; font-weight: bold;');
-            setLoading(false);
-         }
+        if (!signal.aborted) {
+          console.log('%cDEBUG: Chats.tsx useEffect - Fetch END. loading=false', 'color: magenta;');
+          setLoading(false);
+        }
       }
     };
 
     fetchActivities();
 
-    // Cleanup function to abort fetch if component unmounts
-     return () => {
-        console.log('%cDEBUG: Chats.tsx useEffect - Cleanup running. Aborting fetch controller.', 'color: orange;');
-        controller.abort();
-     };
+    return () => {
+      console.log('%cDEBUG: Chats.tsx useEffect - Cleanup, aborting fetch.', 'color: orange;');
+      controller.abort();
+    };
+  }, [user]);
 
-  }, [user]); // Re-fetch only when the user changes
 
   const handleOpenChat = (activity: Activity) => {
      console.log(`%cDEBUG: handleOpenChat - Opening chat for Activity ID: ${activity.id}, Title: ${activity.title}`, 'color: teal;');

@@ -18,6 +18,9 @@ import { useChatStore } from "../utils/chatStore";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatActivityDateTime } from "../utils/formatTime";
 import { Timestamp } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
+import { firestore } from "../utils/firebase";  
+
 
 const ActivityDetailsContent = () => {
   const navigate = useNavigate();
@@ -37,6 +40,7 @@ const ActivityDetailsContent = () => {
   const [chatJoinAttempted, setChatJoinAttempted] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  
 
   
   const formattedDateTime = useMemo(() => {
@@ -75,17 +79,43 @@ const ActivityDetailsContent = () => {
   }, [activity, userIsCreator, creatorIsFriend]);
 
   // Load the activity from the global store only if we haven't already set it optimistically
-  useEffect(() => {
-    if (!activity && activityId && !isLoading && activities.length > 0) {
+  const [triedLookup, setTriedLookup] = useState(false);
+
+
+useEffect(() => {
+  const fetchActivity = async () => {
+    if (!activity && activityId && !triedLookup) {
       const foundActivity = activities.find(a => a.id === activityId);
       if (foundActivity) {
         setActivity(foundActivity);
-      } else {
-        toast.error("Activity not found");
+        setTriedLookup(true);
+        return;
+      }
+
+      try {
+        const docRef = doc(firestore, "activities", activityId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setActivity({ id: activityId, ...data } as Activity); // cast if needed
+        } else {
+          toast.error("Activity not found");
+          navigate("/feed");
+        }
+      } catch (error) {
+        console.error("Error fetching activity:", error);
+        toast.error("Error loading activity");
         navigate("/feed");
+      } finally {
+        setTriedLookup(true);
       }
     }
-  }, [activityId, activities, isLoading, navigate, activity]);
+  };
+
+  fetchActivity();
+}, [activity, activityId, activities, isLoading, navigate, triedLookup]);
+
+  
 
   // Load participant data from the local activity state
   useEffect(() => {
@@ -252,13 +282,24 @@ const ActivityDetailsContent = () => {
     }
   }, []);
 
-  if (isLoading || !activity) {
-    return (
-      <div className="container mx-auto px-4 py-8 flex justify-center items-center">
-        <p>{isLoading ? "Loading activity details..." : "Activity not found."}</p>
-      </div>
-    );
-  }
+// 1️⃣ While the store is loading OR before we've even tried our lookup, stay in "loading"
+if (isLoading || (!activity && !triedLookup)) {
+  return (
+    <div className="container mx-auto px-4 py-8 flex justify-center items-center">
+      <p>Loading activity details…</p>
+    </div>
+  );
+}
+
+// 2️⃣ Only after triedLookup is true and activity is still null do we show "not found"
+if (!activity) {
+  return (
+    <div className="container mx-auto px-4 py-8 flex justify-center items-center">
+      <p>Activity not found.</p>
+    </div>
+  );
+}
+
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -412,7 +453,7 @@ const ActivityDetailsContent = () => {
                 Chat
               </Button>
             )}
-            {userIsParticipant ? (
+            {userIsParticipant ?  (
               <Button 
                 variant="outline" 
                 className="rounded-full bg-red-100 hover:bg-red-200 text-red-600 border-red-200"

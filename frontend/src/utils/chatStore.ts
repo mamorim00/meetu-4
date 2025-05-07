@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 //import { ref, set, onValue, push, update, remove, serverTimestamp, off, DatabaseReference, DataSnapshot, query, orderByChild, endAt } from 'firebase/database';
-import { User } from 'firebase/auth';
+import { User, getAuth } from 'firebase/auth';
 import { toast } from "sonner";
 import { realtimeDb, firestore } from './firebase'; // Import firestore
 import { doc, updateDoc, Timestamp as FirestoreTimestamp } from 'firebase/firestore'; // Import firestore functions
@@ -460,52 +460,48 @@ export const useChatStore = create<ChatState>((set, get) => {
         throw error; // Re-throw to notify caller
       }
     },
-
-    // Leave an activity chat
-    leaveActivityChat: async (activityId: string, userId: string) => {
-       console.log(`%cDEBUG: leaveActivityChat START - User: ${userId}, Activity: ${activityId}`, 'color: orange; font-weight: bold;');
-      try {
-        if (!realtimeDb) {
-          console.error('%cDEBUG: leaveActivityChat ERROR - Realtime Database not initialized', 'color: red;');
-          throw new Error('Chat service is unavailable - please try again later');
-        }
-
-        const memberRef = ref(realtimeDb, `activity-chats/${activityId}/members/${userId}`);
-        const memberSnapshot = await new Promise<DataSnapshot>((resolve, reject) => {
-            onValue(memberRef, resolve, reject, { onlyOnce: true });
-         });
-
-        const displayName = memberSnapshot.val()?.displayName || 'A participant';
-
-        await rtdbRemove(memberRef);
-        console.log(`%cDEBUG: leaveActivityChat - Removed member ${userId} from RTDB for ${activityId}.`, 'color: orange;');
-
-
-        // Add system message about leaving
-        const messagesRef = ref(realtimeDb, `chat-messages/${activityId}`);
-        const newMessageRef = push(messagesRef);
-        await rtdbSet(newMessageRef, {
-          senderId: 'system',
-          senderName: 'System',
-          text: `${displayName} has left the chat.`,
-          timestamp: Date.now()
-        });
-        console.log(`%cDEBUG: leaveActivityChat - Added leave message for ${userId} in ${activityId}.`, 'color: orange;');
-
-        // If the user is currently viewing this chat, unsubscribe
-        if (get().currentChatId === activityId) {
-          console.log(`%cDEBUG: leaveActivityChat - User was viewing the chat they left (${activityId}), unsubscribing.`, 'color: orange;');
-          get().unsubscribeFromChat();
-        }
-
-        console.log(`%cDEBUG: leaveActivityChat END - User ${userId} successfully left chat for activity ${activityId}`, 'color: orange; font-weight: bold;');
-      } catch (error) {
-        console.error('%cDEBUG: leaveActivityChat ERROR:', 'color: red;', error);
-        set({ error: error as Error });
-        throw error;
+    leaveActivityChat: async (activityId: string) => {
+            // don’t trust the passed‐in userId — grab it from the SDK  
+      const auth = getAuth();
+      const currentUid = auth.currentUser?.uid;
+      if (!currentUid) {
+        console.error("DEBUG: leaveActivityChat ERROR – no authenticated user");
+        throw new Error("Not signed in");
       }
+      console.log("→ SDK thinks auth.uid is:", currentUid);
+    
+      // 1) Load your own member data to get displayName
+      const memberRef = ref(realtimeDb, `activity-chats/${activityId}/members/${currentUid}`);
+      const snapshot = await new Promise<DataSnapshot>((res, rej) =>
+        onValue(memberRef, res, rej, { onlyOnce: true })
+      );
+      const displayName = snapshot.val()?.displayName || 'A participant';
+    
+      // 2) Push the “X has left” system message *while* you’re still in members
+      const messagesRef = ref(realtimeDb, `chat-messages/${activityId}`);
+      const newMsgRef   = push(messagesRef);
+      await rtdbSet(newMsgRef, {
+        senderId:   'system',
+        senderName: 'System',
+        text:       `${displayName} has left the chat.`,
+        timestamp:  Date.now()
+      });
+      console.log(`DEBUG: leaveActivityChat — system message sent`);
+     
+      // 3) Now that message is written, remove yourself
+           // 3) Now that message is written, remove yourself  
+            await rtdbRemove(memberRef);
+            console.log(`DEBUG: leaveActivityChat — removed member ${currentUid}`);
+    
+      // 4) Unsubscribe if needed
+      if (get().currentChatId === activityId) {
+        get().unsubscribeFromChat();
+        console.log(`DEBUG: leaveActivityChat — unsubscribed from chat`);
+      }
+    
+      console.log(`DEBUG END leaveActivityChat: success`);
     },
-
+    
     // Send a message to a chat
     sendMessage: async (activityId: string, user: User, text: string): Promise<string | null | undefined> => {
       const functionStartTime = Date.now(); // Debug: Start time

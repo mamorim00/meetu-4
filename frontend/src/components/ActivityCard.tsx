@@ -1,6 +1,6 @@
 // src/components/ActivityCard.tsx
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
   CalendarIcon,
@@ -33,7 +33,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useNavigate } from "react-router-dom";
-import { Timestamp } from "firebase/firestore";
+import { Timestamp, doc, onSnapshot, getFirestore } from "firebase/firestore";
+
+// Make sure to import your initialized firestore instance
+import { firestore } from "../utils/firebase";
 
 interface Props {
   activity: Activity;
@@ -44,22 +47,39 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
   const { user } = useUserGuardContext();
   const { joinActivity, leaveActivity, isParticipant } = useActivityStore();
   const { isFriend, sendFriendRequest } = useFriendsStore();
-  const [joining, setJoining] = React.useState(false);
-  const [leaving, setLeaving] = React.useState(false);
-  const [sendingRequest, setSendingRequest] = React.useState(false);
+  const [joining, setJoining] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [sendingRequest, setSendingRequest] = useState(false);
 
-  const userIsParticipant = isParticipant(activity.id, user.uid);
-  const userIsCreator = activity.createdBy.userId === user.uid;
-  const creatorIsFriend = isFriend(activity.createdBy.userId);
+  // Local state to keep the activity in sync
+  const [liveActivity, setLiveActivity] = useState<Activity>(activity);
+
+  // Subscribe to real-time updates on this activity
+  useEffect(() => {
+    const ref = doc(firestore, "activities", activity.id);
+    const unsubscribe = onSnapshot(ref, (snap) => {
+      if (snap.exists()) {
+        setLiveActivity((prev) => ({
+          ...prev,
+          ...(snap.data() as Partial<Activity>),
+        }));
+      }
+    });
+    return () => unsubscribe();
+  }, [activity.id]);
+
+  const userIsParticipant = isParticipant(liveActivity.id, user.uid);
+  const userIsCreator = liveActivity.createdBy.userId === user.uid;
+  const creatorIsFriend = isFriend(liveActivity.createdBy.userId);
   const canJoinActivity =
-    activity.isPublic !== false || userIsCreator || creatorIsFriend;
+    liveActivity.isPublic !== false || userIsCreator || creatorIsFriend;
 
   const handleSendFriendRequest = async () => {
     if (sendingRequest) return;
     try {
       setSendingRequest(true);
-      await sendFriendRequest(user, activity.createdBy.userId);
-      toast.success(`Friend request sent to ${activity.createdBy.displayName}!`);
+      await sendFriendRequest(user, liveActivity.createdBy.userId);
+      toast.success(`Friend request sent to ${liveActivity.createdBy.displayName}!`);
     } catch (error) {
       console.error(error);
       toast.error(
@@ -74,7 +94,7 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
     if (joining) return;
     try {
       setJoining(true);
-      await joinActivity(activity.id, user.uid);
+      await joinActivity(liveActivity.id, user.uid);
       toast.success("You have joined the activity!");
     } catch (error) {
       console.error(error);
@@ -90,7 +110,7 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
     if (leaving) return;
     try {
       setLeaving(true);
-      await leaveActivity(activity.id, user.uid);
+      await leaveActivity(liveActivity.id, user.uid);
       toast.success("You have left the activity");
     } catch (error) {
       console.error(error);
@@ -104,9 +124,9 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
 
   // Convert dateTime
   const dateObject =
-    activity.dateTime instanceof Timestamp
-      ? activity.dateTime.toDate()
-      : new Date(activity.dateTime);
+    liveActivity.dateTime instanceof Timestamp
+      ? liveActivity.dateTime.toDate()
+      : new Date(liveActivity.dateTime as string);
   const formattedDate = dateObject.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -143,7 +163,7 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
   };
 
   const categoryBorder = (() => {
-    switch (activity.category) {
+    switch (liveActivity.category) {
       case "Sports":
         return "border-primary/30";
       case "Dining":
@@ -166,7 +186,10 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
   })();
 
   const viewActivityDetails = () =>
-    navigate(`/activity-details?id=${activity.id}`);
+    navigate(`/activity-details?id=${liveActivity.id}`);
+
+  // Count participants
+  const participantCount = liveActivity.participantIds.length;
 
   return (
     <Card
@@ -179,8 +202,8 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
     >
       {/* Category Badge */}
       <div className="flex justify-end pt-4 px-4">
-        <Badge className={getCategoryColorClass(activity.category)}>
-          {activity.category}
+        <Badge className={getCategoryColorClass(liveActivity.category)}>
+          {liveActivity.category}
         </Badge>
       </div>
 
@@ -189,7 +212,7 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
         <div className="flex items-center justify-between w-full min-w-0">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <CardTitle className="text-xl truncate flex-1">
-              {activity.title}
+              {liveActivity.title}
             </CardTitle>
             <ExternalLink className="h-4 w-4 text-muted-foreground flex-shrink-0" />
           </div>
@@ -200,7 +223,7 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
                   variant="outline"
                   className="ml-2 flex gap-1 items-center flex-shrink-0"
                 >
-                  {activity.isPublic !== false ? (
+                  {liveActivity.isPublic !== false ? (
                     <>
                       <Globe className="h-3 w-3" />
                       <span>Public</span>
@@ -214,7 +237,7 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
                 </Badge>
               </TooltipTrigger>
               <TooltipContent>
-                {activity.isPublic !== false
+                {liveActivity.isPublic !== false
                   ? "Anyone can see this activity"
                   : "Only the creator and their friends can see this activity"}
               </TooltipContent>
@@ -224,30 +247,32 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
 
         <CardDescription className="mt-1 flex items-center justify-between text-sm w-full min-w-0">
           <span className="truncate">
-            Created by {activity.createdBy.displayName ?? "Unknown User"}
+            Created by {liveActivity.createdBy.displayName ?? "Unknown User"}
           </span>
-          {!userIsCreator && !creatorIsFriend && activity.isPublic === false && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs h-7 px-2 flex-shrink-0"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleSendFriendRequest();
-              }}
-              disabled={sendingRequest}
-            >
-              <UserPlus className="h-3 w-3 mr-1" />
-              {sendingRequest ? "Sending..." : "Add Friend"}
-            </Button>
-          )}
+          {!userIsCreator &&
+            !creatorIsFriend &&
+            liveActivity.isPublic === false && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs h-7 px-2 flex-shrink-0"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSendFriendRequest();
+                }}
+                disabled={sendingRequest}
+              >
+                <UserPlus className="h-3 w-3 mr-1" />
+                {sendingRequest ? "Sending..." : "Add Friend"}
+              </Button>
+            )}
         </CardDescription>
       </CardHeader>
 
       {/* Description & Meta */}
       <CardContent className="p-4 flex-grow flex flex-col">
         <p className="text-sm text-muted-foreground mb-4 line-clamp-3">
-          {activity.description}
+          {liveActivity.description}
         </p>
         <div className="space-y-2">
           <div className="flex items-center text-sm gap-2">
@@ -256,17 +281,17 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
           </div>
           <div className="flex items-center text-sm gap-2">
             <MapPinIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-            <span className="truncate">{activity.location}</span>
+            <span className="truncate">{liveActivity.location}</span>
           </div>
           <div className="flex items-center text-sm gap-2">
             <UsersIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             <span>
-              {activity.participantIds.length} participant
-              {activity.participantIds.length !== 1 && "s"}
+              {participantCount} participant
+              {participantCount !== 1 && "s"}
             </span>
-            {activity.maxParticipants && (
+            {liveActivity.maxParticipants && (
               <span className="text-muted-foreground">
-                (max {activity.maxParticipants})
+                (max {liveActivity.maxParticipants})
               </span>
             )}
           </div>
@@ -275,71 +300,67 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
 
       {/* Footer: Time until + Join/Leave */}
       <CardFooter className="p-4 pt-0 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span>{timeUntil}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="p-0 h-auto text-xs text-primary flex-shrink-0"
-          onClick={(e) => {
-            e.stopPropagation();
-            viewActivityDetails();
-          }}
-        >
-          View details
-        </Button>
-      </div>
-      {userIsParticipant ? (
-        <Button
-          variant="outline"
-          className="rounded-full bg-red-100 hover:bg-red-200 text-red-600 border-red-200"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleLeave();
-          }}
-          disabled={leaving}
-        >
-          {leaving ? "Leaving..." : "Leave Activity"}
-        </Button>
-      ) : canJoinActivity ? (
-        <Button
-          className="rounded-full"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleJoin();
-          }}
-          disabled={
-            joining ||
-            (!!activity.maxParticipants &&
-              activity.participantIds.length >= activity.maxParticipants)
-          }
-        >
-          {joining
-            ? "Joining..."
-            : activity.maxParticipants &&
-              activity.participantIds.length >= activity.maxParticipants
-            ? "Activity Full"
-            : "Join Activity"}
-        </Button>
-      ) : (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                className="rounded-full"
-                variant="secondary"
-                disabled
-              >
-                Private Activity
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              This activity is only visible to friends of the creator
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )}
-    </CardFooter>
-  </Card>
-);
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>{timeUntil}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="p-0 h-auto text-xs text-primary flex-shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              viewActivityDetails();
+            }}
+          >
+            View details
+          </Button>
+        </div>
+        {userIsParticipant ? (
+          <Button
+            variant="outline"
+            className="rounded-full bg-red-100 hover:bg-red-200 text-red-600 border-red-200"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleLeave();
+            }}
+            disabled={leaving}
+          >
+            {leaving ? "Leaving..." : "Leave Activity"}
+          </Button>
+        ) : canJoinActivity ? (
+          <Button
+            className="rounded-full"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleJoin();
+            }}
+            disabled={
+              joining ||
+              (!!liveActivity.maxParticipants &&
+                participantCount >= liveActivity.maxParticipants)
+            }
+          >
+            {joining
+              ? "Joining..."
+              : liveActivity.maxParticipants &&
+                participantCount >= liveActivity.maxParticipants
+              ? "Activity Full"
+              : "Join Activity"}
+          </Button>
+        ) : (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button className="rounded-full" variant="secondary" disabled>
+                  Private Activity
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                This activity is only visible to friends of the creator
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+      </CardFooter>
+    </Card>
+  );
 };
