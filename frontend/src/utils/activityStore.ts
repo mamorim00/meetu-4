@@ -18,6 +18,10 @@ import {
 } from 'firebase/firestore';
 import { ActivityCategory } from '../pages/Feed'; // Ensure this path is correct
 import { useChatStore } from './chatStore'; // Ensure this path is correct
+import { ref as rtdbRef, set as rtdbSet } from "firebase/database";
+import { realtimeDb } from "./firebase";    // your RTDB instance
+import { getAuth } from "firebase/auth";
+
 
 // Initialize Firestore
 const db = getFirestore(firebaseApp);
@@ -216,32 +220,29 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   // --- Join Activity ---
   joinActivity: async (activityId, userId) => {
-     console.log(`%cDEBUG: activityStore.joinActivity - User: ${userId}, Activity: ${activityId}`, 'color: blue;');
-    try {
-      if (!activityId || !userId) {
-        throw new Error('Activity ID and user ID are required');
-      }
+    // 1) Firestore: add user to participantIds
+    const activityRef = doc(db, 'activities', activityId);
+    await updateDoc(activityRef, {
+      participantIds: arrayUnion(userId),
+    });
 
-      const activityRef = doc(db, 'activities', activityId);
-      // Use a transaction or batched write if joining needs to be more atomic with other potential actions
-      await updateDoc(activityRef, {
-        participantIds: arrayUnion(userId), // Atomically add user ID if not present
-      });
+  // 2) RTDB: write member with correct displayName
+  const auth = getAuth(firebaseApp);
+  const currentUser = auth.currentUser!;
+  const displayName = currentUser.displayName || "Anonymous";
 
-      // Check if update was successful (optional, updateDoc throws on error)
-      console.log(`%cDEBUG: activityStore.joinActivity - Firestore updated for ${activityId}.`, 'color: green;');
-
-      // Lazy chat join is handled elsewhere
-
-      console.log(`User ${userId} joined activity ${activityId}`);
-    } catch (error) {
-       // Check for specific errors like permission denied or not found?
-      console.error(`%cDEBUG: activityStore.joinActivity - Error joining activity ${activityId}:`, 'color: red;', error);
-      set({ error: error as Error });
-      throw error;
-    }
+  const memberRef = rtdbRef(
+    realtimeDb,
+    `activity-chats/${activityId}/members/${userId}`
+  );
+  await rtdbSet(memberRef, {
+    userId,
+    displayName,
+    joinedAt: Date.now()
+  });
+    console.log(`User ${displayName} joined RTDB chat members for activity ${activityId}`);
   },
-
+  
   // --- Leave Activity ---
   leaveActivity: async (activityId, userId) => {
     console.log(`%cDEBUG: activityStore.leaveActivity - User: ${userId}, Activity: ${activityId}`, 'color: orange;');

@@ -312,8 +312,11 @@ const SimpleChatInterface: React.FC<SimpleChatInterfaceProps> = ({ activityId })
          return; // Prevent sending if prerequisites are not met
     }
 
+    
+
     setSending(true);
     try {
+     
       // 1) push into RealtimeDB
       const messagesRef = ref(realtimeDb, `chat-messages/${activityId}`);
       const newMessageRef = push(messagesRef);
@@ -326,6 +329,7 @@ const SimpleChatInterface: React.FC<SimpleChatInterfaceProps> = ({ activityId })
       };
       await set(newMessageRef, messageData);
        console.log("Message sent to Realtime DB.");
+       
 
       // 2) mirror into Firestore activity doc - Use Firestore Timestamp
       const activityDocRef = doc(firestore, 'activities', activityId); // Get Firestore doc ref
@@ -335,7 +339,9 @@ const SimpleChatInterface: React.FC<SimpleChatInterfaceProps> = ({ activityId })
               senderName: messageData.senderName,
               // Convert JS timestamp to Firestore Timestamp for Firestore update
               timestamp: FirestoreTimestamp.fromMillis(nowTs)
-          }
+          },
+          lastMessageTimestamp: FirestoreTimestamp.fromMillis(nowTs)
+          
           // You might also want to update a 'updatedAt' field here
           // updatedAt: FirestoreTimestamp.now()
       });

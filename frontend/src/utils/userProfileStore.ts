@@ -47,19 +47,10 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
     // Check if user has a profile, if not create one
     const createProfileIfNeeded = async () => {
       try {
-        console.log('Checking/creating profile for user:', { 
-          uid: user.uid, 
-          displayName: user.displayName || 'NULL', 
-          email: user.email || 'NULL' 
-        });
-        
         const userDocRef = doc(db, 'userProfiles', user.uid);
         const docSnap = await getDoc(userDocRef);
-        
+    
         if (!docSnap.exists()) {
-          console.log('Creating new user profile for:', user.uid);
-          
-          // IMPORTANT - Make sure displayName is never null by using fallback to email or uid
           const newProfile: UserProfile = {
             userId: user.uid,
             displayName: user.displayName || user.email?.split('@')[0] || `User-${user.uid.substring(0, 5)}`,
@@ -69,25 +60,23 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
             lastLoginAt: Date.now(),
             friends: [],
           };
-          
-          console.log('New profile data:', newProfile);
-          
+    
           await setDoc(userDocRef, newProfile);
-          console.log('✅ Profile created successfully');
+          console.log('✅ Profile created successfully:', newProfile);
         } else {
           console.log('Existing profile found for:', user.uid);
+    
           const existingData = docSnap.data();
-          
-          // Check if displayName exists and update if needed
           if (!existingData.displayName && user.displayName) {
-            console.log('Updating missing displayName with:', user.displayName);
+            // Log data merge for verification
             await setDoc(userDocRef, { 
               displayName: user.displayName,
               lastLoginAt: Date.now() 
             }, { merge: true });
+            console.log('Profile displayName updated:', user.displayName);
           } else {
-            // Just update last login time
             await setDoc(userDocRef, { lastLoginAt: Date.now() }, { merge: true });
+            console.log('Profile lastLoginAt updated:', Date.now());
           }
         }
       } catch (error) {
@@ -95,6 +84,7 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
         set({ error: error as Error });
       }
     };
+    
     
     // Create profile immediately (don't wait for async)
     createProfileIfNeeded();

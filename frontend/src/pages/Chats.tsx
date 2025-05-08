@@ -27,31 +27,22 @@ interface Activity {
   // e.g., description, creatorId, etc.
 }
 
-
 export default function Chats() {
   const { user } = useUserGuardContext();
   const navigate = useNavigate();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  // Get unread counts and markChatAsRead from the store
-  // We don't directly use subscribeToChat here, but rely on its side effects (unread counts)
   const { unreadCounts, markChatAsRead } = useChatStore(state => ({
-        unreadCounts: state.unreadCounts,
-        markChatAsRead: state.markChatAsRead,
-  })); // Select only needed parts
+    unreadCounts: state.unreadCounts,
+    markChatAsRead: state.markChatAsRead,
+  }));
 
   useEffect(() => {
-    // Don’t start anything until auth has resolved.
-    // useUserGuardContext should set `user` to `null` (no user) or a User object.
-    // If it’s still `undefined`, exit early.
     if (user === undefined) {
       console.log('%cDEBUG: Chats.tsx useEffect - Auth not yet initialized. Skipping fetch.', 'color: gray;');
       return;
     }
-
-    // Now we know auth is initialized (either signed out or in).
-    // If _signed out_, bail without error:
     if (user === null) {
       console.log('%cDEBUG: Chats.tsx useEffect - User is signed out. Clearing list.', 'color: orange;');
       setActivities([]);
@@ -60,7 +51,6 @@ export default function Chats() {
       return;
     }
 
-    // At this point, user is a valid User
     const controller = new AbortController();
     const signal = controller.signal;
 
@@ -101,7 +91,6 @@ export default function Chats() {
 
         setActivities(fetched);
       } catch (err: any) {
-        // If permission denied because auth not ready, just skip
         if (err.code === 'permission-denied') {
           console.warn('%cDEBUG: Chats.tsx useEffect - Permission denied while fetching; will retry on next auth change.', 'color: orange;');
         } else if (signal.aborted) {
@@ -126,39 +115,31 @@ export default function Chats() {
     };
   }, [user]);
 
-
   const handleOpenChat = (activity: Activity) => {
-     console.log(`%cDEBUG: handleOpenChat - Opening chat for Activity ID: ${activity.id}, Title: ${activity.title}`, 'color: teal;');
-     // Mark as read *before* navigating to potentially clear the badge immediately
-     // This relies on the zustand state update being reasonably fast
-     markChatAsRead(activity.id);
+    console.log(`%cDEBUG: handleOpenChat - Opening chat for Activity ID: ${activity.id}, Title: ${activity.title}`, 'color: teal;');
+    markChatAsRead(activity.id);
     navigate(`/chat-detail?activityId=${activity.id}&activityName=${encodeURIComponent(activity.title)}`);
   };
 
-  // --- Helper to format Firestore Timestamps safely ---
   const renderFormattedDate = (timestamp: FirestoreTimestamp | undefined): string => {
-      if (timestamp && typeof timestamp.toDate === 'function') {
-          try {
-              // Assuming formatDate utility takes a Date object or milliseconds
-              return formatDate(timestamp.toDate());
-          } catch (e) {
-               console.error("Error formatting date:", e, timestamp);
-               return "Invalid Date";
-          }
+    if (timestamp && typeof timestamp.toDate === 'function') {
+      try {
+        return formatDate(timestamp.toDate());
+      } catch (e) {
+        console.error("Error formatting date:", e, timestamp);
+        return "Invalid Date";
       }
-      return "No Date"; // Or some other default
+    }
+    return "No Date";
   };
 
-  // --- Memoize the list of activities to potentially improve performance ---
-  // Although with Firestore ordering, this might be less critical unless other state causes re-renders
   const memoizedActivities = useMemo(() => activities, [activities]);
 
-  // --- Debugging: Log when component renders ---
   console.log('%cDEBUG: Chats.tsx RENDER - Component rendering.', 'color: purple;', { loading, error: error?.message, activityCount: activities.length, memoizedCount: memoizedActivities.length, unreadCounts });
 
   return (
     <Layout>
-      <div className="container max-w-4xl py-6 mx-auto px-4"> {/* Added mx-auto and px-4 for better centering/padding */}
+      <div className="container max-w-4xl py-6 mx-auto px-4">
         <div className="space-y-2 mb-6">
           <h1 className="text-3xl font-bold">Chats</h1>
           <p className="text-muted-foreground">Chat with participants in your activities</p>
@@ -172,9 +153,9 @@ export default function Chats() {
         ) : error ? (
           <Card className="border shadow-sm border-destructive">
             <CardHeader>
-                <CardTitle className="text-destructive flex items-center">
-                     <MessageSquare className="h-5 w-5 mr-2" /> Error Loading Chats
-                </CardTitle>
+              <CardTitle className="text-destructive flex items-center">
+                <MessageSquare className="h-5 w-5 mr-2" /> Error Loading Chats
+              </CardTitle>
             </CardHeader>
             <CardContent className="py-6 text-center">
               <p className="text-muted-foreground text-sm mb-4">
@@ -185,15 +166,15 @@ export default function Chats() {
           </Card>
         ) : memoizedActivities.length === 0 ? (
           <Card className="border shadow-sm">
-             <CardHeader>
-                 <CardTitle className="flex items-center">
-                     <MessageSquare className="h-5 w-5 mr-2 text-primary/70" /> No Chat Activities
-                 </CardTitle>
-             </CardHeader>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <MessageSquare className="h-5 w-5 mr-2 text-primary/70" /> No Chat Activities
+              </CardTitle>
+            </CardHeader>
             <CardContent className="py-10 text-center">
-               <div className="mx-auto bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mb-4">
-                    <Users className="h-8 w-8 text-primary/70" />
-               </div>
+              <div className="mx-auto bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mb-4">
+                <Users className="h-8 w-8 text-primary/70" />
+              </div>
               <p className="text-muted-foreground text-sm mb-4">
                 You haven't joined or created any activities with chats yet.
               </p>
@@ -202,72 +183,57 @@ export default function Chats() {
           </Card>
         ) : (
           <div className="space-y-4">
-            {/* Removed "Your Activity Chats" heading as it's implied */}
             <div className="grid gap-4">
               {memoizedActivities.map((activity) => {
-                  const unreadCount = unreadCounts[activity.id] || 0;
-                  return (
-                    <Card
-                      key={activity.id}
-                      className={`overflow-hidden border shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer ${unreadCount > 0 ? 'border-primary' : ''}`} // Highlight unread
-                      onClick={() => handleOpenChat(activity)}
-                    >
-                      <CardContent className="p-0">
-                        <div className="p-4 flex items-start sm:items-center gap-4"> {/* Adjust alignment for small screens */}
-                          {/* Icon */}
-                          <div className="bg-primary/10 w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center mt-1 sm:mt-0">
-                            <MessageSquare className="h-6 w-6 text-primary/70" />
+                const unreadCount = unreadCounts[activity.id] || 0;
+                return (
+                  <Card
+                    key={activity.id}
+                    className={`overflow-hidden border shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer ${unreadCount > 0 ? 'border-primary' : ''}`}
+                    onClick={() => handleOpenChat(activity)}
+                  >
+                    <CardContent className="p-0">
+                      <div className="p-4 flex items-start sm:items-center gap-4">
+                        <div className="bg-primary/10 w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center mt-1 sm:mt-0">
+                          <MessageSquare className="h-6 w-6 text-primary/70" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <h3 className="font-medium truncate text-lg">{activity.title}</h3>
+                            {unreadCount > 0 && (
+                              <Badge variant="default" className="flex-shrink-0">
+                                {unreadCount} new
+                              </Badge>
+                            )}
                           </div>
-
-                          {/* Main Content */}
-                          <div className="flex-1 min-w-0">
-                            {/* Title and Badge */}
-                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                              <h3 className="font-medium truncate text-lg">{activity.title}</h3>
-                              {unreadCount > 0 && (
-                                  <Badge variant="default" className="flex-shrink-0">
-                                    {/* Simplified badge text */}
-                                    {unreadCount} new
-                                  </Badge>
-                                )}
+                          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                            <div className="flex items-center">
+                              <Users className="h-3 w-3 mr-1 flex-shrink-0" />
+                              {activity.participantIds?.length || 0} participant{(activity.participantIds?.length || 0) !== 1 ? 's' : ''}
                             </div>
-
-                            {/* Details */}
-                            <div className="flex flex-col sm:flex-row sm:flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                              <div className="flex items-center">
-                                <Users className="h-3 w-3 mr-1 flex-shrink-0" />
-                                {activity.participantIds?.length || 0} participant{(activity.participantIds?.length || 0) !== 1 ? 's' : ''}
-                              </div>
-
-                              <div className="flex items-center">
-                                <Calendar className="h-3 w-3 mr-1 flex-shrink-0" />
-                                Activity Date: {renderFormattedDate(activity.dateTime)}
-                              </div>
-
-                              {activity.location && (
-                                 <div className="flex items-center">
-                                    <MapPin className="h-3 w-3 mr-1 flex-shrink-0" />
-                                    {activity.location}
-                                 </div>
-                              )}
-
-                              {/* Show Last Message Time */}
-                               <div className="flex items-center text-blue-600 dark:text-blue-400">
-                                 <ChevronRight className="h-3 w-3 mr-1 flex-shrink-0" />
-                                 Last Message: {renderFormattedDate(activity.lastMessageTimestamp) || "Not yet"}
-                               </div>
-
+                            <div className="flex items-center">
+                              <Calendar className="h-3 w-3 mr-1 flex-shrink-0" />
+                              Activity Date: {renderFormattedDate(activity.dateTime)}
                             </div>
-                          </div>
-
-                          {/* Chevron */}
-                          <div className="ml-auto flex-shrink-0 self-center">
-                             <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                            {activity.location && (
+                              <div className="flex items-center">
+                                <MapPin className="h-3 w-3 mr-1 flex-shrink-0" />
+                                {activity.location}
+                              </div>
+                            )}
+                            <div className="flex items-center text-blue-600 dark:text-blue-400">
+                              <ChevronRight className="h-3 w-3 mr-1 flex-shrink-0" />
+                              Last Message: {renderFormattedDate(activity.lastMessageTimestamp) || "Not yet"}
+                            </div>
                           </div>
                         </div>
-                      </CardContent>
-                    </Card>
-                  );
+                        <div className="ml-auto flex-shrink-0 self-center">
+                          <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
               })}
             </div>
           </div>
