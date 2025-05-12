@@ -7,6 +7,7 @@ import { useFriendsStore, FriendRequestStatus } from "../utils/friendsStore";
 import { toast } from "sonner";
 import { getFirestore, collection, getDocs, query, where } from "firebase/firestore";
 import { firebaseApp } from "app";
+import { useParams, useNavigate } from "react-router-dom"; 
 
 // UI Components
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ const db = getFirestore(firebaseApp);
 export default function Friends() {
   const { user } = useUserGuardContext();
   const { profile } = useUserProfileStore();
+  const navigate = useNavigate();
   const {
     friends,
     sentRequests,
@@ -42,6 +44,7 @@ export default function Friends() {
     rejectFriendRequest,
     removeFriend
   } = useFriendsStore();
+  
 
   const [friendsList, setFriendsList] = useState<UserProfile[]>([]);
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
@@ -167,19 +170,38 @@ export default function Friends() {
           <TabsContent value="friends" className="space-y-4">
             {friendsList.length > 0 ? (
               <div className="space-y-4">
-                {friendsList.map(friend => (
+                {friendsList.map((friend) => (
                   <Card key={friend.userId} className="overflow-hidden">
                     <CardContent className="p-0">
                       <div className="flex items-center p-4">
                         <Avatar className="h-12 w-12 mr-4">
-                          <AvatarImage src={friend.photoURL || ""} alt={friend.displayName || ""} />
-                          <AvatarFallback>{friend.displayName?.charAt(0) || friend.email?.charAt(0)}</AvatarFallback>
+                          <AvatarImage
+                            src={friend.photoURL || ""}
+                            alt={friend.displayName || ""}
+                          />
+                          <AvatarFallback>
+                            {friend.displayName?.charAt(0)}
+                          </AvatarFallback>
                         </Avatar>
                         <div className="flex-1">
-                       
-                          <p className="text-sm text-muted-foreground">{friend.email}</p>
+                          {/* 3) Replace the <Link> block with an onClick */}
+                          <button
+                            className="text-lg font-medium hover:underline"
+                            onClick={() =>
+                              navigate(`/otherprofile?userId=${friend.userId}`)
+                            }
+                          >
+                            {friend.displayName}
+                          </button>
+                          <p className="text-sm text-muted-foreground">
+                            {friend.email}
+                          </p>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => removeFriend(user.uid, friend.userId)}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => removeFriend(user.uid, friend.userId)}
+                        >
                           Remove
                         </Button>
                       </div>
@@ -208,8 +230,16 @@ export default function Friends() {
                         <AvatarImage src={req.senderPhotoURL || ""} alt={req.senderName || ""} />
                         <AvatarFallback>{req.senderName?.charAt(0)}</AvatarFallback>
                       </Avatar>
+                   
                       <div className="flex-1">
-                        <h3 className="text-lg font-medium">{req.senderName}</h3>
+                      <button
+                            className="text-lg font-medium hover:underline"
+                            onClick={() =>
+                              navigate(`/otherprofile?userId=${req.senderId}`)
+                            }
+                          >
+                            {req.senderName}
+                          </button>
                       </div>
                       <div className="flex space-x-2">
                         <Button size="icon" className="h-8 w-8" onClick={() => handleAcceptRequest(req.id)}>
@@ -265,8 +295,14 @@ export default function Friends() {
                           <AvatarFallback>{r.displayName?.charAt(0) || r.email?.charAt(0)}</AvatarFallback>
                         </Avatar>
                         <div className="flex-1">
-                          <h3 className="text-lg font-medium">{r.displayName}</h3>
-                          <p className="text-sm text-muted-foreground">{r.email}</p>
+                          <button
+                            className="text-lg font-medium hover:underline"
+                            onClick={() =>
+                              navigate(`/otherprofile?userId=${r.userId}`)
+                            }
+                          >
+                            {r.displayName || r.email}
+                          </button>
                         </div>
                         {r.isFriend ? (
                             <Badge variant="outline" className="mr-2">Friend</Badge>

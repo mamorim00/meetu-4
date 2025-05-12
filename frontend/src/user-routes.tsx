@@ -13,6 +13,7 @@ const Friends = lazy(() => import("./pages/Friends.tsx"));
 const Login = lazy(() => import("./pages/Login.tsx"));
 const Logout = lazy(() => import("./pages/Logout.tsx"));
 const Profile = lazy(() => import("./pages/Profile.tsx"));
+const OtherUserProfile = lazy(() => import("./pages/OtherUserProfile.tsx"));
 
 // Utility function to wrap components in Suspense
 const withSuspense = (element: React.ReactNode) => (
@@ -32,4 +33,5 @@ export const userRoutes: RouteObject[] = [
   { path: "/login", element: withSuspense(<Login />) },
   { path: "/logout", element: withSuspense(<UserGuard><Logout /></UserGuard>) },
   { path: "/profile", element: withSuspense(<UserGuard><Profile /></UserGuard>) },
+  { path: "/otherprofile", element: withSuspense(<UserGuard><OtherUserProfile /></UserGuard>) },
 ];

@@ -148,13 +148,13 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
       case "Hiking":
         return "bg-accent/10 text-accent hover:bg-accent/20";
       case "Gaming":
-        return "bg-muted/10 text-muted hover:bg-muted/20";
+        return "bg-primary/10 text-primary hover:bg-primary/20";
       case "Movies":
         return "bg-secondary/20 text-secondary-foreground hover:bg-secondary/30";
       case "Travel":
         return "bg-primary/10 text-primary hover:bg-primary/20";
       case "Music":
-        return "bg-muted/10 text-muted hover:bg-muted/20";
+        return "bg-primary/10 text-primary hover:bg-primary/20";
       case "Cooking":
         return "bg-accent/10 text-accent hover:bg-accent/20";
       default:
@@ -171,13 +171,13 @@ export const ActivityCard: React.FC<Props> = ({ activity }) => {
       case "Hiking":
         return "border-accent/30";
       case "Gaming":
-        return "border-muted/30";
+        return "border-primary/30";
       case "Movies":
         return "border-secondary/30";
       case "Travel":
         return "border-primary/30";
       case "Music":
-        return "border-muted/30";
+        return "border-primary/30";
       case "Cooking":
         return "border-accent/30";
       default:
