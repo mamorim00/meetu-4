@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { SignInOrUpForm } from "app";
+import { SignInOrUpForm, firebaseApp } from "app";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Layout } from "components/Layout";
+import { doc, setDoc, getFirestore } from "firebase/firestore";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -21,6 +22,7 @@ export default function Login() {
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const db = getFirestore(firebaseApp);
 
   // Handle sign in with Google
   const handleGoogleSignIn = async () => {
@@ -57,13 +59,29 @@ export default function Login() {
       
       if (isSigningUp) {
         // Sign up
-        const userCredential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
-        // Update user profile with display name
-        if (userCredential.user) {
-          await updateProfile(userCredential.user, {
-            displayName: displayName
-          });
-          console.log("User profile updated with display name:", displayName);
+        if (isSigningUp) {
+          // Signup
+          const userCredential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
+          const user = userCredential.user;
+    
+          if (user) {
+            await updateProfile(user, { displayName });
+    
+            // Profile creation in Firestore
+            const userDocRef = doc(db, 'userProfiles', user.uid);
+            const newProfile = {
+              userId: user.uid,
+              displayName: displayName,
+              email: user.email,
+              photoURL: user.photoURL || null,
+              createdAt: Date.now(),
+              lastLoginAt: Date.now(),
+              friends: []
+            };
+            
+            await setDoc(userDocRef, newProfile);
+            console.log("✅ User profile created successfully in Firestore");
+          }
         }
       } else {
         // Sign in

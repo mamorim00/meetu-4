@@ -98,6 +98,7 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
       where('receiverId', '==', userId)
     );
     
+    
     const receivedRequestsUnsubscribe = onSnapshot(receivedRequestsQuery, (querySnapshot) => {
       const receivedRequestsData: FriendRequest[] = [];
       querySnapshot.forEach((doc) => {
@@ -152,36 +153,35 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
   },
   
   // Accept a friend request
-  acceptFriendRequest: async (requestId) => {
+  acceptFriendRequest: async (requestId: string) => {
     try {
-      const request = get().receivedRequests.find(req => req.id === requestId);
-      if (!request) {
+      const requestRef = doc(db, 'friendRequests', requestId);
+      // 1) load the actual request doc
+      const requestSnap = await getDoc(requestRef);
+      if (!requestSnap.exists()) {
         throw new Error('Friend request not found');
       }
-      
-      // Update request status
-      const requestRef = doc(db, 'friendRequests', requestId);
+      const requestData = requestSnap.data() as FriendRequest;
+      const { senderId, receiverId } = requestData;
+
+      // 2) mark it accepted
       await updateDoc(requestRef, { status: FriendRequestStatus.ACCEPTED });
-      
-      // Add each user to the other's friends list
-      const currentUserRef = doc(db, 'userProfiles', request.receiverId);
-      const senderUserRef = doc(db, 'userProfiles', request.senderId);
-      
-      // Add sender to current user's friends
-      await updateDoc(currentUserRef, {
-        friends: arrayUnion(request.senderId)
-      });
-      
-      // Add current user to sender's friends
-      await updateDoc(senderUserRef, {
-        friends: arrayUnion(request.receiverId)
-      });
+
+      // 3) add each to the other’s friends list
+      const currentUserRef = doc(db, 'userProfiles', receiverId);
+      const senderUserRef  = doc(db, 'userProfiles', senderId);
+
+      await Promise.all([
+        updateDoc(currentUserRef, { friends: arrayUnion(senderId) }),
+        updateDoc(senderUserRef,  { friends: arrayUnion(receiverId) })
+      ]);
     } catch (error) {
       console.error('Error accepting friend request:', error);
       set({ error: error as Error });
       throw error;
     }
   },
+
   
   // Reject a friend request
   rejectFriendRequest: async (requestId) => {
