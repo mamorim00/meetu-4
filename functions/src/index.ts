@@ -1,8 +1,12 @@
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
-import * as admin from 'firebase-admin';
+import { initializeApp } from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 // Initialize the Admin SDK
-admin.initializeApp();
+initializeApp();
+
+// Explicitly grab a Firestore client
+const db = getFirestore();
 
 /**
  * Triggered when a friendRequests document is updated.
@@ -11,7 +15,6 @@ admin.initializeApp();
 export const onFriendRequestAccepted = onDocumentUpdated(
   'friendRequests/{requestId}',
   async (event) => {
-    // v2 Firestore event provides data in event.data
     const beforeData = event.data?.before?.data();
     const afterData  = event.data?.after?.data();
 
@@ -23,15 +26,15 @@ export const onFriendRequestAccepted = onDocumentUpdated(
     // Only proceed if status flipped pending -> accepted
     if (beforeData.status === 'pending' && afterData.status === 'accepted') {
       const { senderId, receiverId } = afterData;
-      const profiles = admin.firestore().collection('userProfiles');
+      const profiles = db.collection('userProfiles');
 
-      // Update both profiles in parallel
+      // Update both profiles in parallel, using the new FieldValue import
       await Promise.all([
         profiles.doc(senderId).update({
-          friends: admin.firestore.FieldValue.arrayUnion(receiverId),
+          friends: FieldValue.arrayUnion(receiverId),
         }),
         profiles.doc(receiverId).update({
-          friends: admin.firestore.FieldValue.arrayUnion(senderId),
+          friends: FieldValue.arrayUnion(senderId),
         }),
       ]);
 
