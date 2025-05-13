@@ -188,7 +188,7 @@ export default function Friends() {
                           <button
                             className="text-lg font-medium hover:underline"
                             onClick={() =>
-                              navigate(`/otherprofile?userId=${friend.userId}`)
+                              navigate(`/other-profile?userId=${friend.userId}`)
                             }
                           >
                             {friend.displayName}
@@ -235,7 +235,7 @@ export default function Friends() {
                       <button
                             className="text-lg font-medium hover:underline"
                             onClick={() =>
-                              navigate(`/otherprofile?userId=${req.senderId}`)
+                              navigate(`/other-profile?userId=${req.senderId}`)
                             }
                           >
                             {req.senderName}
@@ -298,7 +298,7 @@ export default function Friends() {
                           <button
                             className="text-lg font-medium hover:underline"
                             onClick={() =>
-                              navigate(`/otherprofile?userId=${r.userId}`)
+                              navigate(`/other-profile?userId=${r.userId}`)
                             }
                           >
                             {r.displayName || r.email}
