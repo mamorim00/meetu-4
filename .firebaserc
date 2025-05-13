@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "meetudatabutton"
-  }
+    "default": "meetudatabutton",
+    "meetudatabutton": "meetudatabutton"
+  },
+  "targets": {},
+  "etags": {}
 }

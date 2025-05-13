@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { firebaseApp } from 'app';
-import { getFirestore, doc, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, onSnapshot,updateDoc } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 
 // Initialize Firestore
@@ -132,11 +132,15 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
     if (!profile) return;
     
     try {
-      // Optimistic update
+      // ① optimistic local update
       set({ profile: { ...profile, ...data } });
       
-      // Update in Firestore
-      await setDoc(doc(db, 'userProfiles', profile.userId), data, { merge: true });
+      // ② Firestore write
+      await setDoc(
+        doc(db, 'userProfiles', profile.userId),
+        data,
+        { merge: true }
+      );
     } catch (error) {
       console.error('Error updating profile:', error);
       set({ error: error as Error });

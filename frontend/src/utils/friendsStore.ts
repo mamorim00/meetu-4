@@ -1,6 +1,19 @@
 import { create } from 'zustand';
 import { firebaseApp } from 'app';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, onSnapshot, query, where, arrayUnion, arrayRemove, Timestamp, addDoc } from 'firebase/firestore';
+import {
+  getFirestore,
+  collection,
+  doc,
+  getDoc,
+  updateDoc,
+  onSnapshot,
+  query,
+  where,
+  arrayUnion,
+  arrayRemove,
+  Timestamp,
+  addDoc
+} from 'firebase/firestore';
 import { User } from 'firebase/auth';
 
 // Initialize Firestore
@@ -25,6 +38,7 @@ export interface FriendRequest {
 }
 
 // Store interface
+type Unsubscribe = () => void;
 interface FriendsState {
   friends: string[];
   sentRequests: FriendRequest[];
@@ -33,7 +47,7 @@ interface FriendsState {
   error: Error | null;
 
   // Initialize listeners
-  initializeListeners: (userId: string) => () => void;
+  initializeListeners: (userId: string) => Unsubscribe;
   
   // Friend actions
   sendFriendRequest: (currentUser: User, receiverId: string) => Promise<void>;
@@ -58,12 +72,11 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
   // Initialize listeners for friend data
   initializeListeners: (userId: string) => {
     set({ isLoading: true });
-    
-    const unsubscribers: (() => void)[] = [];
-    
-    // 1. Listen for friends list (stored in user profile)
+    const unsubscribers: Unsubscribe[] = [];
+
+    // 1. Listen for friends list
     const userProfileRef = doc(db, 'userProfiles', userId);
-    const profileUnsubscribe = onSnapshot(userProfileRef, (docSnapshot) => {
+    unsubscribers.push(onSnapshot(userProfileRef, (docSnapshot) => {
       if (docSnapshot.exists()) {
         const data = docSnapshot.data();
         set({ friends: data.friends || [] });
@@ -71,16 +84,14 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
     }, (error) => {
       console.error('Error in friends listener:', error);
       set({ error: error as Error });
-    });
-    unsubscribers.push(profileUnsubscribe);
-    
+    }));
+
     // 2. Listen for sent friend requests
     const sentRequestsQuery = query(
       collection(db, 'friendRequests'),
       where('senderId', '==', userId)
     );
-    
-    const sentRequestsUnsubscribe = onSnapshot(sentRequestsQuery, (querySnapshot) => {
+    unsubscribers.push(onSnapshot(sentRequestsQuery, (querySnapshot) => {
       const sentRequestsData: FriendRequest[] = [];
       querySnapshot.forEach((doc) => {
         sentRequestsData.push({ id: doc.id, ...doc.data() } as FriendRequest);
@@ -89,17 +100,14 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
     }, (error) => {
       console.error('Error in sent requests listener:', error);
       set({ error: error as Error });
-    });
-    unsubscribers.push(sentRequestsUnsubscribe);
-    
+    }));
+
     // 3. Listen for received friend requests
     const receivedRequestsQuery = query(
       collection(db, 'friendRequests'),
       where('receiverId', '==', userId)
     );
-    
-    
-    const receivedRequestsUnsubscribe = onSnapshot(receivedRequestsQuery, (querySnapshot) => {
+    unsubscribers.push(onSnapshot(receivedRequestsQuery, (querySnapshot) => {
       const receivedRequestsData: FriendRequest[] = [];
       querySnapshot.forEach((doc) => {
         receivedRequestsData.push({ id: doc.id, ...doc.data() } as FriendRequest);
@@ -108,34 +116,19 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
     }, (error) => {
       console.error('Error in received requests listener:', error);
       set({ error: error as Error, isLoading: false });
-    });
-    unsubscribers.push(receivedRequestsUnsubscribe);
-    
-    // Return a function to unsubscribe from all listeners
-    return () => {
-      unsubscribers.forEach(unsubscribe => unsubscribe());
-    };
+    }));
+
+    return () => unsubscribers.forEach(unsub => unsub());
   },
   
   // Send a friend request
   sendFriendRequest: async (currentUser, receiverId) => {
     try {
-      if (!currentUser.uid || !receiverId) {
-        throw new Error('Missing user information');
-      }
-      
-      // Check if already friends
-      if (get().isFriend(receiverId)) {
-        throw new Error('You are already friends with this user');
-      }
-      
-      // Check if already sent a request
-      if (get().hasSentRequestTo(receiverId)) {
-        throw new Error('You have already sent a friend request to this user');
-      }
-      
-      // Create new friend request
-      const newRequest: Omit<FriendRequest, 'id'> = {
+      if (!currentUser.uid || !receiverId) throw new Error('Missing user information');
+      if (get().isFriend(receiverId)) throw new Error('Already friends');
+      if (get().hasSentRequestTo(receiverId)) throw new Error('Request already sent');
+
+      const newRequest = {
         senderId: currentUser.uid,
         senderName: currentUser.displayName,
         senderPhotoURL: currentUser.photoURL,
@@ -143,7 +136,6 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
         status: FriendRequestStatus.PENDING,
         createdAt: Date.now()
       };
-      
       await addDoc(collection(db, 'friendRequests'), newRequest);
     } catch (error) {
       console.error('Error sending friend request:', error);
@@ -152,29 +144,12 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
     }
   },
   
-  // Accept a friend request
+  // Accept a friend request (client only flips status)
   acceptFriendRequest: async (requestId: string) => {
     try {
       const requestRef = doc(db, 'friendRequests', requestId);
-      // 1) load the actual request doc
-      const requestSnap = await getDoc(requestRef);
-      if (!requestSnap.exists()) {
-        throw new Error('Friend request not found');
-      }
-      const requestData = requestSnap.data() as FriendRequest;
-      const { senderId, receiverId } = requestData;
-
-      // 2) mark it accepted
       await updateDoc(requestRef, { status: FriendRequestStatus.ACCEPTED });
-
-      // 3) add each to the other’s friends list
-      const currentUserRef = doc(db, 'userProfiles', receiverId);
-      const senderUserRef  = doc(db, 'userProfiles', senderId);
-
-      await Promise.all([
-        updateDoc(currentUserRef, { friends: arrayUnion(senderId) }),
-        updateDoc(senderUserRef,  { friends: arrayUnion(receiverId) })
-      ]);
+      // Profile updates handled in Cloud Function
     } catch (error) {
       console.error('Error accepting friend request:', error);
       set({ error: error as Error });
@@ -182,7 +157,6 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
     }
   },
 
-  
   // Reject a friend request
   rejectFriendRequest: async (requestId) => {
     try {
@@ -198,17 +172,10 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
   // Remove a friend
   removeFriend: async (currentUserId, friendId) => {
     try {
-      // Remove friend from current user's friends list
       const currentUserRef = doc(db, 'userProfiles', currentUserId);
-      await updateDoc(currentUserRef, {
-        friends: arrayRemove(friendId)
-      });
-      
-      // Remove current user from friend's friends list
+      await updateDoc(currentUserRef, { friends: arrayRemove(friendId) });
       const friendUserRef = doc(db, 'userProfiles', friendId);
-      await updateDoc(friendUserRef, {
-        friends: arrayRemove(currentUserId)
-      });
+      await updateDoc(friendUserRef, { friends: arrayRemove(currentUserId) });
     } catch (error) {
       console.error('Error removing friend:', error);
       set({ error: error as Error });
@@ -216,22 +183,12 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
     }
   },
   
-  // Check if a user is in the friends list
-  isFriend: (userId) => {
-    return get().friends.includes(userId);
-  },
-  
-  // Check if there's a pending request from this user
-  hasPendingRequestFrom: (userId) => {
-    return get().receivedRequests.some(
-      req => req.senderId === userId && req.status === FriendRequestStatus.PENDING
-    );
-  },
-  
-  // Check if a request has been sent to this user
-  hasSentRequestTo: (userId) => {
-    return get().sentRequests.some(
-      req => req.receiverId === userId && req.status === FriendRequestStatus.PENDING
-    );
-  }
+  // Helpers
+  isFriend: (userId) => get().friends.includes(userId),
+  hasPendingRequestFrom: (userId) =>
+    get().receivedRequests.some(req => req.senderId === userId && req.status === FriendRequestStatus.PENDING),
+  hasSentRequestTo: (userId) =>
+    get().sentRequests.some(req => req.receiverId === userId && req.status === FriendRequestStatus.PENDING)
 }));
+
+// Note: Deploy a Cloud Function to handle the status→friends-array update under admin privileges.

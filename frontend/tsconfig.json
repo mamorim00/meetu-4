@@ -5,7 +5,9 @@
     "lib": [
       "DOM",
       "DOM.Iterable",
-      "ESNext"
+      "ESNext",
+      "es2017",
+      "dom"
     ],
     "allowJs": true,
     "skipLibCheck": true,

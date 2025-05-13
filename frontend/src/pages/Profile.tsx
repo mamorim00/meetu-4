@@ -13,6 +13,9 @@ import { toast, Toaster } from "sonner";
 import { uploadProfilePicture } from "../utils/fileStorage";
 import { Layout } from "components/Layout";
 
+import { resizeImage } from "../utils/imageUtils"; // ← add this import
+
+
 const ACTIVITY_INTERESTS = [
   "Hiking", "Running", "Walking", "Cycling", "Swimming", 
   "Yoga", "Gym", "Dancing", "Movies", "Music", 
@@ -57,6 +60,7 @@ export default function Profile() {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
+  
 
   const toggleInterest = (interest: string) => {
     setSelectedInterests(prev => 
@@ -83,20 +87,22 @@ export default function Profile() {
   };
 
   // Function to handle profile picture update
+
   const handleProfilePictureChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
+  
     try {
-      // Show loading toast
-      toast.loading("Uploading profile picture...");
-
-      // Upload the image to Firebase Storage
-      const photoURL = await uploadProfilePicture(user.uid, file);
-      
-      // Update the photoURL in the user profile
+      toast.loading("Compressing and uploading picture...");
+  
+      const compressedBlob = await resizeImage(file, 128); // e.g. 128x128 max
+      const compressedFile = new File([compressedBlob], file.name, {
+        type: compressedBlob.type,
+      });
+  
+      const photoURL = await uploadProfilePicture(user.uid, compressedFile);
       await updateProfile({ photoURL });
-      
+  
       toast.dismiss();
       toast.success("Profile picture updated successfully");
     } catch (error) {
@@ -105,6 +111,7 @@ export default function Profile() {
       toast.error("Failed to upload profile picture");
     }
   };
+  
 
   if (isLoading) {
     return (
