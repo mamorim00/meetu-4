@@ -121,17 +121,24 @@ export default function Chats() {
     navigate(`/chat-detail?activityId=${activity.id}&activityName=${encodeURIComponent(activity.title)}`);
   };
 
-  const renderFormattedDate = (timestamp: FirestoreTimestamp | undefined): string => {
-    if (timestamp && typeof timestamp.toDate === 'function') {
-      try {
-        return formatDate(timestamp.toDate());
-      } catch (e) {
-        console.error("Error formatting date:", e, timestamp);
-        return "Invalid Date";
-      }
+  const renderFormattedDate = (timestamp: FirestoreTimestamp | string | undefined): string => {
+    try {
+      if (!timestamp) return "No Date";
+  
+      const date =
+        typeof timestamp === "string"
+          ? new Date(timestamp)
+          : typeof timestamp.toDate === "function"
+          ? timestamp.toDate()
+          : new Date(); // fallback
+  
+      return formatDate(date);
+    } catch (e) {
+      console.error("Error formatting date:", e, timestamp);
+      return "Invalid Date";
     }
-    return "No Date";
   };
+  
 
   const memoizedActivities = useMemo(() => activities, [activities]);
 

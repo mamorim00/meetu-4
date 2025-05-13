@@ -14,13 +14,16 @@ import {
   orderBy,
   arrayUnion,
   arrayRemove,
-  Timestamp as FirestoreTimestamp // *** Import Firestore Timestamp ***
+  Timestamp as FirestoreTimestamp, // *** Import Firestore Timestamp ***
+  QuerySnapshot,
+  DocumentData
 } from 'firebase/firestore';
 import { ActivityCategory } from '../pages/Feed'; // Ensure this path is correct
 import { useChatStore } from './chatStore'; // Ensure this path is correct
 import { ref as rtdbRef, set as rtdbSet } from "firebase/database";
 import { realtimeDb } from "./firebase";    // your RTDB instance
 import { getAuth } from "firebase/auth";
+import { useFriendsStore } from './friendsStore';
 
 
 // Initialize Firestore
@@ -76,72 +79,114 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   // --- Initialize Listener (Consider type safety) ---
   initializeListener: (userId = '', showFriendsOnly = false) => {
-    console.log(`%cDEBUG: activityStore.initializeListener - Initializing... User: ${userId || 'None'}, ShowFriendsOnly: ${showFriendsOnly}`, 'color: brown;');
+    console.log(
+      `%cDEBUG: activityStore.initializeListener - Initializing... User: ${userId || 'None'}, ShowFriendsOnly: ${showFriendsOnly}`,
+      'color: brown;'
+    );
     set({ isLoading: true, error: null });
-    // Adjust query based on userId/showFriendsOnly if needed later
-    // For now, keeping the original query logic
-    const q = query(
-      collection(db, 'activities'),
-      where('isPublic', '==', true),
-      orderBy('dateTime')
-    );
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        console.log(`%cDEBUG: activityStore.initializeListener - Snapshot received. Docs: ${querySnapshot.size}`, 'color: brown;');
-        const activitiesData: Activity[] = [];
-        querySnapshot.forEach((docSnap) => {
-          const data = docSnap.data(); // Get typed data potentially
-          // Add more robust type checking if possible
-          activitiesData.push({
-            id: docSnap.id,
-            title: data.title || 'Untitled',
-            description: data.description || '',
-            location: data.location || 'No location',
-            latitude: typeof data.latitude === 'number' ? data.latitude : 0,
-            longitude: typeof data.longitude === 'number' ? data.longitude : 0,
-            // Keep dateTime as stored for now, handle conversion in UI if needed
-            dateTime: data.dateTime || new Date().toISOString(), // Default to now if missing? Risky.
-            category: data.category || 'Other',
-            createdBy: {
-              userId: data.createdBy?.userId || 'unknown',
-              displayName: data.createdBy?.displayName || 'Unknown',
-            },
-            participantIds: Array.isArray(data.participantIds) ? data.participantIds : [],
-            maxParticipants: typeof data.maxParticipants === 'number' ? data.maxParticipants : undefined,
-            // createdAt should ideally be Firestore Timestamp, but using number from your code
-            createdAt: typeof data.createdAt === 'number' ? data.createdAt : Date.now(),
-            isPublic: typeof data.isPublic === 'boolean' ? data.isPublic : true,
-            // *** Include lastMessageTimestamp when reading ***
-            lastMessageTimestamp: data.lastMessageTimestamp instanceof FirestoreTimestamp ? data.lastMessageTimestamp : undefined,
-          });
+  
+    const dbRef = collection(db, 'activities');
+    const friends = useFriendsStore.getState().friends || [];
+    const friendIds = [...new Set([...friends, userId])];
+  
+    // Create listener for public activities
+    const publicQuery = query(dbRef, where('isPublic', '==', true), orderBy('dateTime'));
+    const unsubscribers: (() => void)[] = [];
+  
+    const seen = new Set<string>();
+    let activitiesMap = new Map<string, Activity>();
+  
+    const processSnapshot = (snapshot: QuerySnapshot<DocumentData>) => {
+      let hasChanged = false;
+  
+      snapshot.docChanges().forEach(change => {
+        const doc = change.doc;
+        const data = doc.data();
+        const activityId = doc.id;
+  
+        if (change.type === 'removed') {
+          if (activitiesMap.delete(activityId)) hasChanged = true;
+          seen.delete(activityId);
+          return;
+        }
+  
+        const activity: Activity = {
+          id: activityId,
+          title: data.title || 'Untitled',
+          description: data.description || '',
+          location: data.location || 'No location',
+          latitude: typeof data.latitude === 'number' ? data.latitude : 0,
+          longitude: typeof data.longitude === 'number' ? data.longitude : 0,
+          dateTime: data.dateTime || new Date().toISOString(),
+          category: data.category || 'Other',
+          createdBy: {
+            userId: data.createdBy?.userId || 'unknown',
+            displayName: data.createdBy?.displayName || 'Unknown',
+          },
+          participantIds: Array.isArray(data.participantIds) ? data.participantIds : [],
+          maxParticipants: typeof data.maxParticipants === 'number' ? data.maxParticipants : undefined,
+          createdAt: typeof data.createdAt === 'number' ? data.createdAt : Date.now(),
+          isPublic: typeof data.isPublic === 'boolean' ? data.isPublic : true,
+          lastMessageTimestamp:
+            data.lastMessageTimestamp instanceof FirestoreTimestamp
+              ? data.lastMessageTimestamp
+              : undefined,
+        };
+  
+        // Only update if new or changed
+        const prev = activitiesMap.get(activityId);
+        if (!prev || JSON.stringify(prev) !== JSON.stringify(activity)) {
+          activitiesMap.set(activityId, activity);
+          hasChanged = true;
+        }
+        seen.add(activityId);
+      });
+  
+      if (hasChanged) {
+        const activitiesArray = Array.from(activitiesMap.values()).sort((a, b) => {
+          const timeA = typeof a.dateTime === 'string'
+            ? new Date(a.dateTime).getTime()
+            : a.dateTime instanceof FirestoreTimestamp
+              ? a.dateTime.toMillis()
+              : 0;
+          const timeB = typeof b.dateTime === 'string'
+            ? new Date(b.dateTime).getTime()
+            : b.dateTime instanceof FirestoreTimestamp
+              ? b.dateTime.toMillis()
+              : 0;
+          return timeA - timeB;
         });
-
-        // Client-side sort by dateTime (as original code did)
-        // The Firestore query in Chats.tsx handles the lastMessageTimestamp sort
-        activitiesData.sort(
-          (a, b) => {
-              try {
-                 // Assuming dateTime is string ISO format or Timestamp
-                 const timeA = typeof a.dateTime === 'string' ? new Date(a.dateTime).getTime() : a.dateTime instanceof FirestoreTimestamp ? a.dateTime.toMillis() : 0;
-                 const timeB = typeof b.dateTime === 'string' ? new Date(b.dateTime).getTime() : b.dateTime instanceof FirestoreTimestamp ? b.dateTime.toMillis() : 0;
-                 return timeA - timeB;
-              } catch (e) { return 0; } // Handle potential date parsing errors
-          }
-        );
-        console.log(`%cDEBUG: activityStore.initializeListener - Setting ${activitiesData.length} activities.`, 'color: brown;');
-        set({ activities: activitiesData, isLoading: false, error: null });
-      },
-      (error) => {
-        console.error('%cDEBUG: activityStore.initializeListener - Error:', 'color: red;', error);
-        set({ error, isLoading: false });
+  
+        console.log(`%cDEBUG: Realtime update, total activities: ${activitiesArray.length}`, 'color: green');
+        set({ activities: activitiesArray, isLoading: false });
       }
+    };
+  
+    // Listen to public activities
+    unsubscribers.push(
+      onSnapshot(publicQuery, processSnapshot, (err) => {
+        console.error('Public snapshot error:', err);
+        set({ error: err, isLoading: false });
+      })
     );
-
-    // Return the unsubscribe function for cleanup
-    return unsubscribe;
+  
+    // Split friends into chunks of 10 and listen to each
+    for (let i = 0; i < friendIds.length; i += 10) {
+      const chunk = friendIds.slice(i, i + 10);
+      const privateQuery = query(dbRef, where('createdBy.userId', 'in', chunk), orderBy('dateTime'));
+      const unsubscribe = onSnapshot(privateQuery, processSnapshot, (err) => {
+        console.error('Private snapshot error:', err);
+        set({ error: err, isLoading: false });
+      });
+      unsubscribers.push(unsubscribe);
+    }
+  
+    // Return a master unsubscribe function
+    return () => {
+      unsubscribers.forEach(unsub => unsub());
+    };
   },
-
+  
 
   // --- Create Activity ---
   createActivity: async (activity) => {
