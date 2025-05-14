@@ -292,7 +292,7 @@ export default function Create() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => navigate("/feed")}
+                onClick={() => navigate("/myactivities")}
               >
                 Cancel
               </Button>
