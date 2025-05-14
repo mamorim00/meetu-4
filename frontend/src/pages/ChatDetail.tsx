@@ -313,7 +313,7 @@ const SimpleChatInterface: React.FC<SimpleChatInterfaceProps> = ({ activityId })
     }
 
     
-
+    setMessageText("");
     setSending(true);
     try {
      
