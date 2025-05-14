@@ -1,12 +1,16 @@
 import { onDocumentUpdated, onDocumentCreated, onDocumentDeleted  } from 'firebase-functions/v2/firestore';
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getDatabase } from 'firebase-admin/database';
+
+
 
 // Initialize the Admin SDK
 initializeApp();
 
 // Explicitly grab a Firestore client
 const db = getFirestore();
+const rtdb = getDatabase();
 
 /**
  * Triggered when a friendRequests document is updated.
@@ -24,12 +28,12 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
     const ownerSnap = await db.doc(`users/${activity.ownerId}`).get();
     const ownerData = ownerSnap.exists ? ownerSnap.data() : {};
   
-    await db.doc(`chats/${activityId}/members/${activity.ownerId}`).set({
-      joinedAt: FieldValue.serverTimestamp(),
-      ...ownerData,
+    await rtdb.ref(`activity-chats/${activityId}/members/${activity.ownerId}`).set({
+      joinedAt: Date.now(),
+      name: ownerData?.name ?? null,
     });
   
-    console.log(`Owner ${activity.ownerId} added to chat ${activityId}`);
+    console.log(`Owner ${activity.ownerId} added to activity-chats/${activityId}/members`);
   });
   
   
@@ -40,12 +44,12 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
     const userSnap = await db.doc(`users/${userId}`).get();
     const userData = userSnap.exists ? userSnap.data() : {};
   
-    await db.doc(`chats/${activityId}/members/${userId}`).set({
-      joinedAt: FieldValue.serverTimestamp(),
-      ...userData,
+    await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).set({
+      joinedAt: Date.now(),
+      name: userData?.name ?? null,
     });
   
-    console.log(`Participant ${userId} added to chat ${activityId}`);
+    console.log(`Participant ${userId} added to activity-chats/${activityId}/members`);
   });
   
   
@@ -53,9 +57,9 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
   export const onParticipantRemoved = onDocumentDeleted('activities/{activityId}/participants/{userId}', async (event) => {
     const { activityId, userId } = event.params;
   
-    await db.doc(`chats/${activityId}/members/${userId}`).delete();
+    await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).remove();
   
-    console.log(`Participant ${userId} removed from chat ${activityId}`);
+    console.log(`Participant ${userId} removed from activity-chats/${activityId}/members`);
   });
 
 export const onFriendRequestAccepted = onDocumentUpdated(
