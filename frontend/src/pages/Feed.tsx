@@ -53,6 +53,7 @@ export default function Feed() {
     return () => unsub();
   }, [user.uid, initializeFriends]);
 
+
   console.log('DEBUG Feed — friends from hook →', friends);
   const [searchQuery, setSearchQuery] = useState("");
   const [showFriendsOnly, setShowFriendsOnly] = useState(false);

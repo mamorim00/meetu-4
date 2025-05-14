@@ -65,7 +65,9 @@ export function AppProvider({ children }: AppProviderProps) {
     console.log('Initializing activity store with user:', user.uid, user.displayName || 'Unknown');
     
     // Initialize with user ID to filter activities based on privacy
-    const unsubscribe = useActivityStore.getState().initializeListener(user.uid);
+    const friendIds = useFriendsStore.getState().friends; // or however you store them
+    const unsubscribe = useActivityStore.getState().initializeListener(user.uid, friendIds);
+
     
     return () => {
       // Clean up listener when component unmounts or user changes
