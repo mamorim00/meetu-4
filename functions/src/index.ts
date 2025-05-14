@@ -12,6 +12,29 @@ const db = getFirestore();
  * Triggered when a friendRequests document is updated.
  * Checks for status change from 'pending' to 'accepted' and updates userProfiles.
  */
+
+export const onParticipantAdded = onDocumentUpdated(
+    'activities/{activityId}/participants/{userId}',
+    async (event) => {
+      const { activityId, userId } = event.params;
+  
+      const before = event.data?.before.exists ? event.data.before.data() : null;
+      const after = event.data?.after.exists ? event.data.after.data() : null;
+  
+      // If the participant was just added (doc didn't exist before), run logic
+      if (!before && after) {
+        const userSnap = await db.doc(`users/${userId}`).get();
+        const userData = userSnap.exists ? userSnap.data() : {};
+  
+        await db.doc(`chats/${activityId}/members/${userId}`).set({
+          joinedAt: FieldValue.serverTimestamp(),
+          ...userData,
+        });
+  
+        console.log(`User ${userId} added to chat ${activityId}`);
+      }
+    }
+  );
 export const onFriendRequestAccepted = onDocumentUpdated(
   'friendRequests/{requestId}',
   async (event) => {
