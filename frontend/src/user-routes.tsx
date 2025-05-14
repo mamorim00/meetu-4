@@ -14,6 +14,8 @@ const Login = lazy(() => import("./pages/Login.tsx"));
 const Logout = lazy(() => import("./pages/Logout.tsx"));
 const Profile = lazy(() => import("./pages/Profile.tsx"));
 const OtherUserProfile = lazy(() => import("./pages/OtherUserProfile.tsx"));
+const MyActivities = lazy(() => import("./pages/MyActivities.tsx"));
+const EditActivity = lazy(() => import("./pages/EditActivity.tsx"));
 
 // Utility function to wrap components in Suspense
 const withSuspense = (element: React.ReactNode) => (
@@ -35,4 +37,7 @@ export const userRoutes: RouteObject[] = [
   { path: "/profile", element: withSuspense(<UserGuard><Profile /></UserGuard>) },
   { path: "/otherprofile", element: withSuspense(<UserGuard><OtherUserProfile /></UserGuard>) },
   { path: "/other-profile", element: withSuspense(<UserGuard><OtherUserProfile /></UserGuard>) },
+  { path: "/myactivities", element: withSuspense(<UserGuard><MyActivities /></UserGuard>) },
+  { path: "/editactivity", element: withSuspense(<UserGuard><EditActivity /></UserGuard>) },
+  { path: "/edit-activity", element: withSuspense(<UserGuard><EditActivity /></UserGuard>) },
 ];

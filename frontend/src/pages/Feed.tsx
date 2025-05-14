@@ -17,6 +17,7 @@ import { Timestamp } from "firebase/firestore";
 
 
 
+
 // Haversine formula to compute distance between two lat/lng points in km
 function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
@@ -41,7 +42,18 @@ export type ActivityCategory =
   | "Music"
   | "Cooking";
 
+
 export default function Feed() {
+  const { user } = useUserGuardContext();
+  const initializeFriends = useFriendsStore((s) => s.initializeListeners);
+  const friends = useFriendsStore((s) => s.friends);
+  useEffect(() => {
+    if (!user.uid) return;
+    const unsub = initializeFriends(user.uid);
+    return () => unsub();
+  }, [user.uid, initializeFriends]);
+
+  console.log('DEBUG Feed — friends from hook →', friends);
   const [searchQuery, setSearchQuery] = useState("");
   const [showFriendsOnly, setShowFriendsOnly] = useState(false);
 
@@ -52,15 +64,20 @@ export default function Feed() {
   const [timeFilter, setTimeFilter] = useState<"upcoming" | "archive">("upcoming");
   const [activeCategory, setActiveCategory] = useState<ActivityCategory>("All");
 
-  const { user } = useUserGuardContext();
   const { activities, isLoading, initializeListener } = useActivityStore();
   const { isFriend } = useFriendsStore();
+  console.log('DEBUG Feed — friends from hook →', friends);
 
+  // in Feed.tsx
   useEffect(() => {
-    const unsub = initializeListener(user.uid);
+    // Pass friends (which should be string[]) directly in:
+    const unsub = initializeListener(
+      user.uid,
+      friends,
+      showFriendsOnly,
+    );
     return () => unsub();
-  }, [initializeListener, user.uid]);
-
+  }, [user.uid, friends, showFriendsOnly]); 
 
   const timeFiltered = useMemo(() => {
     const now = new Date();
@@ -87,10 +104,17 @@ export default function Feed() {
     ) return false;
 
     const isOwn = activity.createdBy.userId === user.uid;
-    const isPublic = activity.isPublic !== false;
+    if (isOwn) return false; // Always hide your own activities in this feed
+
     const creatorIsFriend = isFriend(activity.createdBy.userId);
-    if (!(isOwn || isPublic || creatorIsFriend)) return false;
-    if (showFriendsOnly && !(isOwn || creatorIsFriend)) return false;
+
+    if (showFriendsOnly) {
+      // Only show friend's activities (no public or own)
+      if (!creatorIsFriend) return false;
+    } else {
+      const isPublic = activity.isPublic !== false;
+      if (!(isPublic || creatorIsFriend)) return false;
+    }
 
     if (center) {
       const dist = getDistance(center.lat, center.lng, activity.latitude, activity.longitude);

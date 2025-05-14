@@ -16,7 +16,8 @@ import {
   arrayRemove,
   Timestamp as FirestoreTimestamp, // *** Import Firestore Timestamp ***
   QuerySnapshot,
-  DocumentData
+  DocumentData,
+  FirestoreError,
 } from 'firebase/firestore';
 import { ActivityCategory } from '../pages/Feed'; // Ensure this path is correct
 import { useChatStore } from './chatStore'; // Ensure this path is correct
@@ -24,6 +25,7 @@ import { ref as rtdbRef, set as rtdbSet } from "firebase/database";
 import { realtimeDb } from "./firebase";    // your RTDB instance
 import { getAuth } from "firebase/auth";
 import { useFriendsStore } from './friendsStore';
+
 
 
 // Initialize Firestore
@@ -64,52 +66,55 @@ interface ActivityState {
   activities: Activity[];
   isLoading: boolean;
   error: Error | null;
-  initializeListener: (userId?: string, showPrivate?: boolean) => () => void;
+  initializeListener: (
+    userId: string,
+    friendIds: string[],
+    showPrivate?: boolean
+  ) => () => void;
   createActivity: (activity: NewActivity) => Promise<string>;
   joinActivity: (activityId: string, userId: string) => Promise<void>;
   leaveActivity: (activityId: string, userId: string) => Promise<void>;
   deleteActivity: (activityId: string, userId: string) => Promise<void>;
   isParticipant: (activityId: string, userId: string) => boolean;
+  updateActivity: (activityId: string, data: Partial<Activity>) => Promise<void>;
 }
 
 export const useActivityStore = create<ActivityState>((set, get) => ({
   activities: [],
   isLoading: false,
   error: null,
-
-  // --- Initialize Listener (Consider type safety) ---
-  initializeListener: (userId = '', showFriendsOnly = false) => {
-    console.log(
-      `%cDEBUG: activityStore.initializeListener - Initializing... User: ${userId || 'None'}, ShowFriendsOnly: ${showFriendsOnly}`,
-      'color: brown;'
-    );
+  initializeListener: (
+    userId: string,
+    friendIds: string[],
+    showFriendsOnly = false
+  ) => {
     set({ isLoading: true, error: null });
-  
     const dbRef = collection(db, 'activities');
-    const friends = useFriendsStore.getState().friends || [];
-    const friendIds = [...new Set([...friends, userId])];
   
-    // Create listener for public activities
-    const publicQuery = query(dbRef, where('isPublic', '==', true), orderBy('dateTime'));
+    // build your final unique set here
+    const allCreatorIds = Array.from(new Set([...friendIds, userId]));
+    console.log('DEBUG: initializeListener: allCreatorIds =', allCreatorIds);
+  
     const unsubscribers: (() => void)[] = [];
+    const activitiesMap = new Map<string, Activity>();
   
-    const seen = new Set<string>();
-    let activitiesMap = new Map<string, Activity>();
+  
+
   
     const processSnapshot = (snapshot: QuerySnapshot<DocumentData>) => {
       let hasChanged = false;
   
       snapshot.docChanges().forEach(change => {
-        const doc = change.doc;
-        const data = doc.data();
-        const activityId = doc.id;
+        const activityId = change.doc.id;
   
         if (change.type === 'removed') {
-          if (activitiesMap.delete(activityId)) hasChanged = true;
-          seen.delete(activityId);
+          if (activitiesMap.delete(activityId)) {
+            hasChanged = true;
+          }
           return;
         }
   
+        const data = change.doc.data();
         const activity: Activity = {
           id: activityId,
           title: data.title || 'Untitled',
@@ -123,70 +128,82 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
             userId: data.createdBy?.userId || 'unknown',
             displayName: data.createdBy?.displayName || 'Unknown',
           },
-          participantIds: Array.isArray(data.participantIds) ? data.participantIds : [],
-          maxParticipants: typeof data.maxParticipants === 'number' ? data.maxParticipants : undefined,
-          createdAt: typeof data.createdAt === 'number' ? data.createdAt : Date.now(),
-          isPublic: typeof data.isPublic === 'boolean' ? data.isPublic : true,
+          participantIds: Array.isArray(data.participantIds)
+            ? data.participantIds
+            : [],
+          maxParticipants:
+            typeof data.maxParticipants === 'number'
+              ? data.maxParticipants
+              : undefined,
+          createdAt:
+            typeof data.createdAt === 'number'
+              ? data.createdAt
+              : Date.now(),
+          isPublic:
+            typeof data.isPublic === 'boolean' ? data.isPublic : true,
           lastMessageTimestamp:
             data.lastMessageTimestamp instanceof FirestoreTimestamp
               ? data.lastMessageTimestamp
               : undefined,
         };
   
-        // Only update if new or changed
         const prev = activitiesMap.get(activityId);
         if (!prev || JSON.stringify(prev) !== JSON.stringify(activity)) {
           activitiesMap.set(activityId, activity);
           hasChanged = true;
         }
-        seen.add(activityId);
       });
   
       if (hasChanged) {
         const activitiesArray = Array.from(activitiesMap.values()).sort((a, b) => {
-          const timeA = typeof a.dateTime === 'string'
-            ? new Date(a.dateTime).getTime()
-            : a.dateTime instanceof FirestoreTimestamp
+          const timeA =
+            a.dateTime instanceof FirestoreTimestamp
               ? a.dateTime.toMillis()
-              : 0;
-          const timeB = typeof b.dateTime === 'string'
-            ? new Date(b.dateTime).getTime()
-            : b.dateTime instanceof FirestoreTimestamp
+              : new Date(a.dateTime).getTime();
+          const timeB =
+            b.dateTime instanceof FirestoreTimestamp
               ? b.dateTime.toMillis()
-              : 0;
+              : new Date(b.dateTime).getTime();
           return timeA - timeB;
         });
   
-        console.log(`%cDEBUG: Realtime update, total activities: ${activitiesArray.length}`, 'color: green');
+        console.log(
+          `%cDEBUG: Realtime update, total activities: ${activitiesArray.length}`,
+          'color: green'
+        );
         set({ activities: activitiesArray, isLoading: false });
       }
     };
   
-    // Listen to public activities
-    unsubscribers.push(
-      onSnapshot(publicQuery, processSnapshot, (err) => {
-        console.error('Public snapshot error:', err);
-        set({ error: err, isLoading: false });
-      })
-    );
-  
-    // Split friends into chunks of 10 and listen to each
-    for (let i = 0; i < friendIds.length; i += 10) {
-      const chunk = friendIds.slice(i, i + 10);
-      const privateQuery = query(dbRef, where('createdBy.userId', 'in', chunk), orderBy('dateTime'));
-      const unsubscribe = onSnapshot(privateQuery, processSnapshot, (err) => {
-        console.error('Private snapshot error:', err);
-        set({ error: err, isLoading: false });
-      });
-      unsubscribers.push(unsubscribe);
-    }
-  
-    // Return a master unsubscribe function
-    return () => {
-      unsubscribers.forEach(unsub => unsub());
+    const handleError = (err: FirestoreError) => {
+      console.error('Snapshot error:', err);
+      set({ error: err, isLoading: false });
     };
-  },
   
+     
+  // only subscribe to public if showFriendsOnly is false
+  if (!showFriendsOnly) {
+    const publicQ = query(
+      dbRef,
+      where('isPublic', '==', true),
+      orderBy('dateTime', 'asc'),
+    );
+    unsubscribers.push(onSnapshot(publicQ, processSnapshot, handleError));
+  }
+
+  // chunk the allCreatorIds into 10‑sized slices
+  for (let i = 0; i < allCreatorIds.length; i += 10) {
+    const chunk = allCreatorIds.slice(i, i + 10);
+    const privateQ = query(
+      dbRef,
+      where('createdBy.userId', 'in', chunk),
+      orderBy('dateTime', 'asc')  // make sure you have the composite index, or remove this
+    );
+    unsubscribers.push(onSnapshot(privateQ, processSnapshot, handleError));
+  }
+
+  return () => unsubscribers.forEach((u) => u());
+},
 
   // --- Create Activity ---
   createActivity: async (activity) => {
@@ -262,6 +279,16 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       lastMessageTimestamp: FirestoreTimestamp.fromMillis(timestampMillis)
     });
   },
+
+    /** Edit an existing activity document */
+   updateActivity: async (activityId, data) => {
+     const ref = doc(db, 'activities', activityId);
+     // If dateTime was edited as a string, convert to Timestamp
+     if (typeof data.dateTime === 'string') {
+       data.dateTime = FirestoreTimestamp.fromDate(new Date(data.dateTime));
+     }
+     await updateDoc(ref, data);
+   },
 
   // --- Join Activity ---
   joinActivity: async (activityId, userId) => {

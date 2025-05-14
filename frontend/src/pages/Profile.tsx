@@ -183,6 +183,14 @@ export default function Profile() {
           </CardHeader>
           <CardContent><Button onClick={() => navigate("/friends")} variant="outline" className="w-full"><Users className="h-4 w-4 mr-2" />View Friends & Requests</Button></CardContent>
         </Card>
+        {/* My Activities*/}
+        <Card className="shadow-md">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5" />My Activities</CardTitle>
+            <CardDescription>Manage your activities</CardDescription>
+          </CardHeader>
+          <CardContent><Button onClick={() => navigate("/myactivities")} variant="outline" className="w-full"><Users className="h-4 w-4 mr-2" />View and Edit Your Activities</Button></CardContent>
+        </Card>
         {/* Share Profile Card */}
         <Card className="shadow-sm">
           <CardHeader>
@@ -198,6 +206,7 @@ export default function Profile() {
             }}>Copy Profile Link</Button>
           </CardContent>
         </Card>
+        
         {/* Bio & Location Card */}
         <Card className="shadow-sm">
           <CardHeader><CardTitle>About Me</CardTitle></CardHeader>

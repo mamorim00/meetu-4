@@ -436,116 +436,135 @@ if (!activity) {
         </CardContent>
         
         <CardFooter className="pt-0 flex justify-between">
-          <div className="flex gap-2">
-            {userIsParticipant && (
+  <div className="flex gap-2">
+    {userIsParticipant && (
+      <Button
+        className="rounded-full"
+        variant="secondary"
+        onClick={() =>
+          navigate(
+            `/chat-detail?activityId=${activity.id}&activityName=${encodeURIComponent(
+              activity.title
+            )}`
+          )
+        }
+      >
+        <MessageSquare className="mr-2 h-4 w-4" />
+        Chat
+      </Button>
+    )}
+
+    {!userIsCreator && (
+      userIsParticipant ? (
+        <Button
+          variant="outline"
+          className="rounded-full bg-red-100 hover:bg-red-200 text-red-600 border-red-200"
+          onClick={handleLeave}
+          disabled={leaving}
+        >
+          {leaving ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Leaving...
+            </>
+          ) : (
+            "Leave Activity"
+          )}
+        </Button>
+      ) : canJoinActivity ? (
+        <Button
+          className="rounded-full"
+          onClick={handleJoin}
+          disabled={
+            joining ||
+            (activity.maxParticipants &&
+              activity.participantIds.length >= activity.maxParticipants)
+          }
+        >
+          {joining ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Joining...
+            </>
+          ) : activity.maxParticipants &&
+            activity.participantIds.length >= activity.maxParticipants ? (
+            "Activity Full"
+          ) : (
+            "Join Activity"
+          )}
+        </Button>
+      ) : (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
               <Button
                 className="rounded-full"
                 variant="secondary"
-                onClick={() =>
-                  navigate(
-                    `/chat-detail?activityId=${activity.id}&activityName=${encodeURIComponent(
-                      activity.title
-                    )}`
-                  )
-                }
+                disabled
               >
-                <MessageSquare className="mr-2 h-4 w-4" />
-                Chat
+                Private Activity
               </Button>
-            )}
-            {userIsParticipant ?  (
-              <Button 
-                variant="outline" 
-                className="rounded-full bg-red-100 hover:bg-red-200 text-red-600 border-red-200"
-                onClick={handleLeave}
-                disabled={leaving}
-              >
-                {leaving ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Leaving...
-                  </>
-                ) : (
-                  "Leave Activity"
-                )}
-              </Button>
-            ) : canJoinActivity ? (
-              <Button 
-                className="rounded-full"
-                onClick={handleJoin}
-                disabled={joining || (activity.maxParticipants && activity.participantIds.length >= activity.maxParticipants)}
-              >
-                {joining ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Joining...
-                  </>
-                ) : (activity.maxParticipants && activity.participantIds.length >= activity.maxParticipants) ? (
-                  "Activity Full"
-                ) : (
-                  "Join Activity"
-                )}
-              </Button>
-            ) : (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button 
-                      className="rounded-full" 
-                      variant="secondary"
-                      disabled
-                    >
-                      Private Activity
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    This activity is only visible to friends of the creator
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-          </div>
-          
-          {userIsCreator && (
-            <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-              <AlertDialogTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="rounded-full bg-red-100 hover:bg-red-200 text-red-600 border-red-200"
-                >
-                  Delete Activity
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will permanently delete the activity and remove it from the feed.
-                    All participants will be notified and the activity chat will be deleted.
-                    This action cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={handleDeleteActivity}
-                    className="bg-red-600 hover:bg-red-700 text-white"
-                    disabled={isDeleting}
-                  >
-                    {isDeleting ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Deleting...
-                      </>
-                    ) : (
-                      "Delete Activity"
-                    )}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          )}
-        </CardFooter>
+            </TooltipTrigger>
+            <TooltipContent>
+              This activity is only visible to friends of the creator
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
+    )}
+  </div>
+
+  {userIsCreator && (
+    <div className="flex gap-2">
+    <Button
+      variant="outline"
+      className="bg-blue-100 hover:bg-blue-200 text-blue-600 border-blue-200"
+      onClick={() => navigate(`/edit-activity?id=${activity.id}`)}
+    >
+      Edit Activity
+    </Button>
+
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="outline"
+            className="bg-red-100 hover:bg-red-200 text-red-600 border-red-200"
+          >
+            Delete Activity
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the activity and remove it from the feed.
+              All participants will be notified and the activity chat will be deleted.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteActivity}
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Activity"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )}
+</CardFooter>
+
       </Card>
       
       {/* Participants Dialog */}
