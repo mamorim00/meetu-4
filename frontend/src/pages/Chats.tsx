@@ -148,7 +148,6 @@ export default function Chats() {
     <Layout>
       <div className="container max-w-4xl py-6 mx-auto px-4">
         <div className="space-y-2 mb-6">
-          <h1 className="text-3xl font-bold">Chats</h1>
           <p className="text-muted-foreground">Chat with participants in your activities</p>
         </div>
 

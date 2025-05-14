@@ -148,7 +148,7 @@ export default function Create() {
   };
 
   return (
-    <Layout title="Create New Activity">
+    <Layout>
       <div className="container mx-auto max-w-3xl px-4">
         <Card className="bg-card shadow-sm border-border/40">
           <CardHeader>

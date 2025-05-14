@@ -103,9 +103,8 @@ export default function Feed() {
   });
 
   return (
-    <Layout title="Activity Feed">
+    <Layout>
       <div className="container mx-auto max-w-7xl px-6 pt-4 space-y-6">
-
         {/* Near‑Me Filter (always visible) */}
         <div className="flex flex-col sm:flex-row gap-4">
           <LocationAutocomplete

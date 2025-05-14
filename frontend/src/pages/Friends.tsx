@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Check, X, UserPlus, Search } from "lucide-react";
+import { Check, X, UserPlus, Search, ArrowLeft } from "lucide-react";
 
 interface UserSearchResult {
   userId: string;
@@ -152,7 +152,18 @@ export default function Friends() {
   const pendingRequests = receivedRequests.filter(r => r.status === FriendRequestStatus.PENDING);
 
   return (
-    <Layout title="Friends">
+   
+
+    <Layout contentClassName="container mx-auto px-4 py-6 max-w-4xl">
+       <div className="container mx-auto px-4 py-8 max-w-4xl">
+    {/* Back Button */}
+    <div className="mb-6">
+      <Button variant="ghost" onClick={() => navigate("/feed")} className="group">
+        <ArrowLeft className="mr-2 h-4 w-4 transition-transform group-hover:-translate-x-1" />
+        Back to Feed
+      </Button>
+    </div>
+    </div>
       <div className="container mx-auto max-w-4xl">
         <Tabs defaultValue="friends" className="w-full">
           <TabsList className="grid w-full grid-cols-3 mb-8">

@@ -492,9 +492,9 @@ const SimpleChatInterface: React.FC<SimpleChatInterfaceProps> = ({ activityId })
   };
 
   return (
+    
     <div className="flex flex-col h-[calc(100vh - 180px)]"> {/* Adjust height based on surrounding layout */}
       {renderMessages()}
-
       <div className="p-4 border-t bg-card"> {/* Added bg-card for clarity */}
         {/* Show refresh button only when not loading or there's an error */}
         {!isLoading && messages.length > 0 && !error && (
