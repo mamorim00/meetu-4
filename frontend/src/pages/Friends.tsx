@@ -212,9 +212,6 @@ export default function Friends() {
             ) : (
               <div className="text-center py-12">
                 <p className="text-muted-foreground">You don't have any friends yet.</p>
-                <Button variant="outline" className="mt-4" onClick={() => (document.querySelector('[value="find"]') as HTMLButtonElement)?.click()}>
-                  Find Friends
-                </Button>
               </div>
             )}
           </TabsContent>
