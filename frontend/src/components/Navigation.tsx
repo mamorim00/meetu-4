@@ -97,18 +97,7 @@ export const Navigation: React.FC<NavigationProps> = () => {
         
         {/* Auth buttons and user profile on desktop */}
         <div className="space-y-4 pb-6 px-2">
-          {user && profile && (
-            <div className="flex items-center gap-3 px-3 py-2 rounded-2xl bg-muted/30 mb-4">
-              <Avatar className="h-10 w-10">
-                <AvatarImage src={profile.photoURL || undefined} alt={profile.displayName || "User"} />
-                <AvatarFallback>{profile.displayName?.charAt(0) || profile.email?.charAt(0) || user.uid?.charAt(0) || "U"}</AvatarFallback>
-              </Avatar>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{profile.displayName || user.email?.split('@')[0] || `User-${user.uid.substring(0, 5)}`}</p>
-                <p className="text-xs text-muted-foreground truncate">{profile.email || user.email || ""}</p>
-              </div>
-            </div>
-          )}
+        
           
           {authButtons
             .filter(button => button.show)

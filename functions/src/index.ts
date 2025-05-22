@@ -12,6 +12,48 @@ initializeApp();
 const db = getFirestore();
 const rtdb = getDatabase();
 
+// When a user is created or updated, add a lowercase version of their display name
+export const onUserCreatedOrUpdated = onDocumentUpdated('users/{userId}', async (event) => {
+  const after = event.data?.after?.data();
+  const before = event.data?.before?.data();
+
+  if (!after) {
+    console.warn('Missing after data in user update');
+    return;
+  }
+
+  // Only update if displayName changed or lowercase field is missing
+  if (
+    after.displayName &&
+    (before?.displayName !== after.displayName || !after.displayName_lowercase)
+  ) {
+    const displayNameLower = after.displayName.toLowerCase();
+
+    await db.doc(`users/${event.params.userId}`).update({
+      displayName_lowercase: displayNameLower,
+    });
+
+    console.log(`Updated displayName_lowercase for user ${event.params.userId}`);
+  }
+});
+
+export const onUserCreated = onDocumentCreated('users/{userId}', async (event) => {
+  const data = event.data?.data();
+  if (!data?.displayName) {
+    console.warn(`User ${event.params.userId} created without a displayName`);
+    return;
+  }
+
+  const displayNameLower = data.displayName.toLowerCase();
+
+  await db.doc(`users/${event.params.userId}`).update({
+    displayName_lowercase: displayNameLower,
+  });
+
+  console.log(`Created displayName_lowercase for user ${event.params.userId}`);
+});
+
+
 /**
  * Triggered when a friendRequests document is updated.
  * Checks for status change from 'pending' to 'accepted' and updates userProfiles.
