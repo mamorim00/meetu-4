@@ -77,6 +77,38 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
   
     console.log(`Owner ${activity.ownerId} added to activity-chats/${activityId}/members`);
   });
+
+  
+
+export const onActivityCreatedOrUpdated = onDocumentUpdated(
+  "activities/{activityId}",
+  async (event) => {
+    const after  = event.data?.after?.data();
+    const before = event.data?.before?.data();
+    const activityId = event.params.activityId;
+
+    if (!after) {
+      console.warn(`Missing after data in activity update for ${activityId}`);
+      return;
+    }
+
+    // Only update if title changed or lowercase field is missing
+    if (
+      typeof after.title === "string" &&
+      (before?.title !== after.title || !after.title_lowercase)
+    ) {
+      const titleLower = after.title.toLowerCase();
+
+      await db.doc(`activities/${activityId}`).update({
+        title_lowercase: titleLower,
+      });
+
+      console.log(
+        `Updated title_lowercase="${titleLower}" for activity ${activityId}`
+      );
+    }
+  }
+);
   
   
   // 2. When a participant is added, add them to the chat
