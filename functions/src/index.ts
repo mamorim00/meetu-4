@@ -59,56 +59,34 @@ export const onUserCreated = onDocumentCreated('users/{userId}', async (event) =
  * Checks for status change from 'pending' to 'accepted' and updates userProfiles.
  */
 export const onActivityCreated = onDocumentCreated('activities/{activityId}', async (event) => {
-    const activity = event.data?.data();
-    const { activityId } = event.params;
-  
-    if (!activity?.ownerId) {
-      console.warn(`No ownerId found for activity ${activityId}`);
-      return;
-    }
-  
-    const ownerSnap = await db.doc(`users/${activity.ownerId}`).get();
-    const ownerData = ownerSnap.exists ? ownerSnap.data() : {};
-  
-    await rtdb.ref(`activity-chats/${activityId}/members/${activity.ownerId}`).set({
-      joinedAt: Date.now(),
-      name: ownerData?.name ?? null,
-    });
-  
-    console.log(`Owner ${activity.ownerId} added to activity-chats/${activityId}/members`);
+  const activity = event.data?.data();
+  const { activityId } = event.params;
+
+  if (!activity?.ownerId) {
+    console.warn(`No ownerId found for activity ${activityId}`);
+    return;
+  }
+
+  const ownerSnap = await db.doc(`users/${activity.ownerId}`).get();
+  const ownerData = ownerSnap.exists ? ownerSnap.data() : {};
+
+  await rtdb.ref(`activity-chats/${activityId}/members/${activity.ownerId}`).set({
+    joinedAt: Date.now(),
+    name: ownerData?.name ?? null,
   });
 
-  
+  console.log(`Owner ${activity.ownerId} added to activity-chats/${activityId}/members`);
 
-export const onActivityCreatedOrUpdated = onDocumentUpdated(
-  "activities/{activityId}",
-  async (event) => {
-    const after  = event.data?.after?.data();
-    const before = event.data?.before?.data();
-    const activityId = event.params.activityId;
-
-    if (!after) {
-      console.warn(`Missing after data in activity update for ${activityId}`);
-      return;
-    }
-
-    // Only update if title changed or lowercase field is missing
-    if (
-      typeof after.title === "string" &&
-      (before?.title !== after.title || !after.title_lowercase)
-    ) {
-      const titleLower = after.title.toLowerCase();
-
-      await db.doc(`activities/${activityId}`).update({
-        title_lowercase: titleLower,
-      });
-
-      console.log(
-        `Updated title_lowercase="${titleLower}" for activity ${activityId}`
-      );
-    }
+  // Add lowercase title if title exists
+  if (typeof activity.title === "string") {
+    const titleLower = activity.title.toLowerCase();
+    await db.doc(`activities/${activityId}`).update({
+      title_lowercase: titleLower,
+    });
+    console.log(`Added title_lowercase="${titleLower}" to activity ${activityId}`);
   }
-);
+});
+
   
   
   // 2. When a participant is added, add them to the chat
