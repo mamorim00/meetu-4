@@ -54,65 +54,103 @@ export const onUserCreated = onDocumentCreated('users/{userId}', async (event) =
 });
 
 
-/**
- * Triggered when a friendRequests document is updated.
- * Checks for status change from 'pending' to 'accepted' and updates userProfiles.
- */
+// ——————————————————————————————————
+// 1) When an activity is created:
 export const onActivityCreated = onDocumentCreated('activities/{activityId}', async (event) => {
-  const activity = event.data?.data();
+  const activity   = event.data?.data();
   const { activityId } = event.params;
 
-  if (!activity?.ownerId) {
-    console.warn(`No ownerId found for activity ${activityId}`);
+  if (!activity) {
+    console.warn(`onActivityCreated: no data for ${activityId}`);
     return;
   }
 
-  const ownerSnap = await db.doc(`users/${activity.ownerId}`).get();
-  const ownerData = ownerSnap.exists ? ownerSnap.data() : {};
+  // 1️⃣ Add owner to RTDB members
+  if (activity.ownerId) {
+    const ownerSnap = await db.doc(`users/${activity.ownerId}`).get();
+    const ownerData = ownerSnap.exists ? ownerSnap.data()! : {};
 
-  await rtdb.ref(`activity-chats/${activityId}/members/${activity.ownerId}`).set({
-    joinedAt: Date.now(),
-    name: ownerData?.name ?? null,
-  });
+    await rtdb.ref(`activity-chats/${activityId}/members/${activity.ownerId}`).set({
+      joinedAt: Date.now(),
+      name:     ownerData.name || null,
+    });
 
-  console.log(`Owner ${activity.ownerId} added to activity-chats/${activityId}/members`);
+    // 1️⃣a Push “Chat created…” system message
+    await rtdb.ref(`chat-messages/${activityId}`).push({
+      senderId:   'system',
+      senderName: 'System',
+      text:       'Chat created. Welcome! Coordinate with participants here.',
+      timestamp:  Date.now(),
+      type:       'system'
+    });
 
-  // Add lowercase title if title exists
+    console.log(`Owner ${activity.ownerId} added and welcome message sent for chat ${activityId}`);
+  } else {
+    console.warn(`onActivityCreated: No ownerId for ${activityId}`);
+  }
+
+  // 2️⃣ Add lowercase title
   if (typeof activity.title === "string") {
     const titleLower = activity.title.toLowerCase();
-    await db.doc(`activities/${activityId}`).update({
-      title_lowercase: titleLower,
-    });
+    await db.doc(`activities/${activityId}`).update({ title_lowercase: titleLower });
     console.log(`Added title_lowercase="${titleLower}" to activity ${activityId}`);
   }
 });
 
-  
-  
-  // 2. When a participant is added, add them to the chat
-  export const onParticipantAdded = onDocumentCreated('activities/{activityId}/participants/{userId}', async (event) => {
+
+// ——————————————————————————————————
+// 2) When someone joins (participant subcollection created):
+export const onParticipantAdded = onDocumentCreated(
+  'activities/{activityId}/participants/{userId}',
+  async (event) => {
     const { activityId, userId } = event.params;
-  
     const userSnap = await db.doc(`users/${userId}`).get();
-    const userData = userSnap.exists ? userSnap.data() : {};
-  
+    const userData = userSnap.exists ? userSnap.data()! : {};
+
+    // 2️⃣a Add them into RTDB members
     await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).set({
       joinedAt: Date.now(),
-      name: userData?.name ?? null,
+      name:     userData.name || null,
     });
-  
-    console.log(`Participant ${userId} added to activity-chats/${activityId}/members`);
-  });
-  
-  
-  // 3. When a participant is removed, remove them from the chat
-  export const onParticipantRemoved = onDocumentDeleted('activities/{activityId}/participants/{userId}', async (event) => {
+
+    // 2️⃣b Push “X has joined…” system message
+    await rtdb.ref(`chat-messages/${activityId}`).push({
+      senderId:   'system',
+      senderName: 'System',
+      text:       `${userData.name || 'A participant'} has joined the chat.`,
+      timestamp:  Date.now(),
+      type:       'system'
+    });
+
+    console.log(`Participant ${userId} added and join message sent for chat ${activityId}`);
+  }
+);
+
+
+// ——————————————————————————————————
+// 3) When someone leaves (participant subcollection deleted):
+export const onParticipantRemoved = onDocumentDeleted(
+  'activities/{activityId}/participants/{userId}',
+  async (event) => {
     const { activityId, userId } = event.params;
-  
+    const oldData = event.data?.data() || {};
+    const displayName = oldData.displayName || 'A participant';
+
+    // 3️⃣a Push “X has left…” system message
+    await rtdb.ref(`chat-messages/${activityId}`).push({
+      senderId:   'system',
+      senderName: 'System',
+      text:       `${displayName} has left the chat.`,
+      timestamp:  Date.now(),
+      type:       'system'
+    });
+
+    // 3️⃣b Remove from RTDB members
     await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).remove();
-  
-    console.log(`Participant ${userId} removed from activity-chats/${activityId}/members`);
-  });
+
+    console.log(`Participant ${userId} removed and leave message sent for chat ${activityId}`);
+  }
+);
 
 export const onFriendRequestAccepted = onDocumentUpdated(
   'friendRequests/{requestId}',
