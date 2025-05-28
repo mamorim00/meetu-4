@@ -214,3 +214,50 @@ export const onFriendRequestAccepted = onDocumentUpdated(
     }
   }
 );
+
+export const cleanupInactiveChats = onSchedule('every day 01:00', async () => {
+  const fiveDaysAgo = Date.now() - 5 * 24 * 60 * 60 * 1000;
+
+  const chatRefs = await rtdb.ref('activity-chats').get();
+  if (!chatRefs.exists()) {
+    console.log('No chats to check.');
+    return;
+  }
+
+  let deletedCount = 0;
+
+  const deletions = Object.keys(chatRefs.val()).map(async (activityId) => {
+    try {
+      const activityDoc = await db.doc(`activities/${activityId}`).get();
+
+      // If activity was deleted or is older than 5 days
+      if (!activityDoc.exists) {
+        console.log(`Activity ${activityId} was deleted. Removing chat.`);
+        await deleteChat(activityId);
+        deletedCount++;
+      } else {
+        const activityData = activityDoc.data();
+        const activityDate = activityData?.dateTime?.toMillis?.() || new Date(activityData?.dateTime).getTime();
+
+        if (activityDate && activityDate < fiveDaysAgo) {
+          console.log(`Activity ${activityId} is older than 5 days. Removing chat.`);
+          await deleteChat(activityId);
+          deletedCount++;
+        }
+      }
+    } catch (err) {
+      console.warn(`Error processing activity ${activityId}:`, err);
+    }
+  });
+
+  await Promise.all(deletions);
+
+  console.log(`Cleanup done. Deleted ${deletedCount} inactive chats.`);
+});
+
+async function deleteChat(activityId: string) {
+  // Remove chat messages
+  await rtdb.ref(`chat-messages/${activityId}`).remove();
+  // Remove members list
+  await rtdb.ref(`activity-chats/${activityId}`).remove();
+}
