@@ -85,6 +85,10 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
           name: ownerName,
         });
 
+
+  // 1a) Add to /user-chats/{ownerId}/{activityId}
+      await rtdb.ref(`user-chats/${ownerId}/${activityId}`).set(true);
+
       // 1️⃣a Push “Chat created…” system message
       await rtdb.ref(`chat-messages/${activityId}`).push({
         senderId: 'system',
@@ -124,52 +128,63 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
   
 });
 
+export const onParticipantAdded = onDocumentUpdated(
+  'activities/{activityId}',
+  async (event) => {
+    const { activityId } = event.params;
 
-export const onParticipantAdded = onDocumentUpdated('activities/{activityId}', async (event) => {
-  const { activityId } = event.params;
+    const before = event.data?.before?.data();
+    const after  = event.data?.after?.data();
+    if (!before || !after) {
+      console.warn(`onParticipantAdded: missing before/after for ${activityId}`);
+      return;
+    }
 
-  const before = event.data?.before?.data();
-  const after = event.data?.after?.data();
+    const beforeIds = before.participantIds as string[] || [];
+    const afterIds  = after.participantIds  as string[] || [];
 
-  if (!before || !after) {
-    console.warn(`onParticipantAdded: missing before/after for ${activityId}`);
-    return;
-  }
+    // Compute newly added user IDs
+    const newlyAdded = afterIds.filter((id: string) => !beforeIds.includes(id));
 
-  const beforeIds = before.participantIds || [];
-  const afterIds = after.participantIds || [];
+    for (const userId of newlyAdded) {
+      try {
+        console.log('👤 Detected new participant:', userId, 'in activity', activityId);
 
-  // Compute newly added user IDs
-  const newlyAdded = afterIds.filter((id: string) => !beforeIds.includes(id));
+        const userSnap  = await db.doc(`users/${userId}`).get();
+        const userData  = userSnap.exists ? userSnap.data()! : {};
+        const displayName = userData.displayName || userData.name || null;
 
-  for (const userId of newlyAdded) {
-    try {
-      console.log('👤 Detected new participant:', userId, 'in activity', activityId);
+        // 1️⃣ Add to RTDB members list
+        await rtdb
+          .ref(`activity-chats/${activityId}/members/${userId}`)
+          .set({
+            joinedAt: Date.now(),
+            name:     displayName,
+          });
 
-      const userSnap = await db.doc(`users/${userId}`).get();
-      const userData = userSnap.exists ? userSnap.data()! : {};
+        // 2️⃣ Maintain per-user index
+        await rtdb
+          .ref(`user-chats/${userId}/${activityId}`)
+          .set(true);
 
-      // Add to RTDB members
-      await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).set({
-        joinedAt: Date.now(),
-        name: userData.name || null,
-      });
+        // 3️⃣ Send “X has joined” system message
+        await rtdb
+          .ref(`chat-messages/${activityId}`)
+          .push({
+            senderId:   'system',
+            senderName: 'System',
+            text:       `${displayName || 'A participant'} has joined the chat.`,
+            timestamp:  Date.now(),
+            type:       'system',
+          });
 
-      // Send system message
-      await rtdb.ref(`chat-messages/${activityId}`).push({
-        senderId: 'system',
-        senderName: 'System',
-        text: `${userData.name || 'A participant'} has joined the chat.`,
-        timestamp: Date.now(),
-        type: 'system',
-      });
-
-      console.log(`✅ Participant ${userId} added to chat for activity ${activityId}`);
-    } catch (err) {
-      console.error(`❌ Failed to add participant ${userId} to chat:`, err);
+        console.log(`✅ Participant ${userId} indexed and welcome message sent for chat ${activityId}`);
+      } catch (err) {
+        console.error(`❌ Failed to process new participant ${userId} for chat ${activityId}:`, err);
+      }
     }
   }
-});
+);
 
 
 // 4) Scheduled function: archive past activities once a day
@@ -199,32 +214,49 @@ export const archivePastActivities = onSchedule('every day 00:00', async () => {
 
 
 
-
-
 // ——————————————————————————————————
 // 3) When someone leaves (participant subcollection deleted):
 export const onParticipantRemoved = onDocumentDeleted(
   'activities/{activityId}/participants/{userId}',
   async (event) => {
     const { activityId, userId } = event.params;
-    const oldData = event.data?.data() || {};
+    const oldData     = event.data?.data() || {};
     const displayName = oldData.displayName || 'A participant';
 
-    // 3️⃣a Push “X has left…” system message
-    await rtdb.ref(`chat-messages/${activityId}`).push({
-      senderId:   'system',
-      senderName: 'System',
-      text:       `${displayName} has left the chat.`,
-      timestamp:  Date.now(),
-      type:       'system'
-    });
+    try {
+      // 3️⃣a Push “X has left…” system message
+      await rtdb
+        .ref(`chat-messages/${activityId}`)
+        .push({
+          senderId:   'system',
+          senderName: 'System',
+          text:       `${displayName} has left the chat.`,
+          timestamp:  Date.now(),
+          type:       'system',
+        });
 
-    // 3️⃣b Remove from RTDB members
-    await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).remove();
+      // 3️⃣b Remove from RTDB members
+      await rtdb
+        .ref(`activity-chats/${activityId}/members/${userId}`)
+        .remove();
 
-    console.log(`Participant ${userId} removed and leave message sent for chat ${activityId}`);
+      // 3️⃣c Remove from per-user index
+      await rtdb
+        .ref(`user-chats/${userId}/${activityId}`)
+        .remove();
+
+      console.log(
+        `✅ Participant ${userId} removed from members, index cleared, and leave message sent for chat ${activityId}`
+      );
+    } catch (err) {
+      console.error(
+        `❌ Error in onParticipantRemoved for user ${userId}, chat ${activityId}:`,
+        err
+      );
+    }
   }
 );
+
 
 export const onFriendRequestAccepted = onDocumentUpdated(
   'friendRequests/{requestId}',
