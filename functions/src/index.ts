@@ -136,6 +136,7 @@ export const onParticipantAdded = onDocumentCreated(
   'activities/{activityId}/participants/{userId}',
   async (event) => {
     const { activityId, userId } = event.params;
+    console.log('🐛 onParticipantAdded fired for', activityId, userId);
     const userSnap = await db.doc(`users/${userId}`).get();
     const userData = userSnap.exists ? userSnap.data()! : {};
 
