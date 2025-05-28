@@ -19,8 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatActivityDateTime } from "../utils/formatTime";
 import { Timestamp } from "firebase/firestore";
 import { doc, getDoc } from "firebase/firestore";
-import { firestore } from "../utils/firebase";  
-
+import { firestore } from "../utils/firebase"; 
 
 const ActivityDetailsContent = () => {
   const navigate = useNavigate();
@@ -115,29 +114,39 @@ useEffect(() => {
   fetchActivity();
 }, [activity, activityId, activities, isLoading, navigate, triedLookup]);
 
-  
 
-  // Load participant data from the local activity state
-  useEffect(() => {
+useEffect(() => {
+  const fetchParticipants = async () => {
     if (!activity || !activity.participantIds?.length) {
       setParticipants([]);
       return;
     }
-    // Prepare organizer info and other participants info
+
+    const creatorId = activity.createdBy.userId;
+    const creatorDoc = await getDoc(doc(firestore, "userProfiles", creatorId));
     const creatorInfo = {
-      id: activity.createdBy.userId,
-      name: activity.createdBy.displayName || `User-${activity.createdBy.userId.substring(0, 5)}`,
-      photoURL: null
+      id: creatorId,
+      name: creatorDoc.exists() ? creatorDoc.data().displayName : `User-${creatorId.substring(0, 5)}`,
+      photoURL: creatorDoc.exists() ? creatorDoc.data().photoURL : null
     };
-    const otherParticipants = activity.participantIds
-      .filter(id => id !== activity.createdBy.userId)
-      .map(id => ({
+
+    const otherIds = activity.participantIds.filter(id => id !== creatorId);
+    const otherPromises = otherIds.map(async (id) => {
+      const userDoc = await getDoc(doc(firestore, "userProfiles", id));
+      return {
         id,
-        name: `Participant ${id.substring(0, 5)}...`,
-        photoURL: null
-      }));
-    setParticipants([creatorInfo, ...otherParticipants]);
-  }, [activity]);
+        name: userDoc.exists() ? userDoc.data().displayName : `User-${id.substring(0, 5)}`,
+        photoURL: userDoc.exists() ? userDoc.data().photoURL : null
+      };
+    });
+
+    const others = await Promise.all(otherPromises);
+    setParticipants([creatorInfo, ...others]);
+  };
+
+  fetchParticipants();
+}, [activity]);
+
 
   // Handle joining the activity
   const handleJoin = useCallback(async () => {
