@@ -51,6 +51,7 @@ export const onUserCreated = onDocumentCreated('users/{userId}', async (event) =
 
   console.log(`Created displayName_lowercase for user ${event.params.userId}`);
 });
+import { Timestamp } from 'firebase-admin/firestore';
 
 
 // ——————————————————————————————————
@@ -58,6 +59,8 @@ export const onUserCreated = onDocumentCreated('users/{userId}', async (event) =
 export const onActivityCreated = onDocumentCreated('activities/{activityId}', async (event) => {
   const activity   = event.data?.data();
   const { activityId } = event.params;
+  const tsMillis = Date.now();
+  const tsFire = Timestamp.fromMillis(tsMillis);
 
   if (!activity) {
     console.warn(`onActivityCreated: no data for ${activityId}`);
@@ -112,6 +115,12 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
     console.error(`onActivityCreated [${activityId}] failed:`, err);
     throw err; // so the error surfaces in Cloud Functions logs
   }
+   // 4) **CRITICAL**: set lastMessageTimestamp on your Firestore doc
+   await db.doc(`activities/${activityId}`).update({
+    lastMessageTimestamp: tsFire,
+    title_lowercase:      (activity.title || '').toLowerCase(),
+    archived:             false,
+  });
   
 });
 
