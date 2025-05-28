@@ -2,8 +2,7 @@ import { onDocumentUpdated, onDocumentCreated, onDocumentDeleted  } from 'fireba
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getDatabase } from 'firebase-admin/database';
-
-
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 
 // Initialize the Admin SDK
 initializeApp();
@@ -95,7 +94,40 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
     await db.doc(`activities/${activityId}`).update({ title_lowercase: titleLower });
     console.log(`Added title_lowercase="${titleLower}" to activity ${activityId}`);
   }
+
+    // 3️⃣ Set initial archived flag to false
+    await db.doc(`activities/${activityId}`).update({ archived: false });
+    console.log(`Set archived=false for activity ${activityId}`);
+
+  
 });
+
+// 4) Scheduled function: archive past activities once a day
+
+// 4) Scheduled function: archive past activities once a day
+export const archivePastActivities = onSchedule('every day 00:00', async () => {
+  const now = new Date();
+
+  const snapshot = await db.collection('activities')
+    .where('archived', '==', false)
+    .where('dateTime', '<', now)
+    .get();
+
+  if (snapshot.empty) {
+    console.log('No past activities to archive.');
+    return;
+  }
+
+  const batch = db.batch();
+  snapshot.docs.forEach(doc => {
+    batch.update(doc.ref, { archived: true });
+    console.log(`Archiving activity ${doc.id}`);
+  });
+
+  await batch.commit();
+  console.log(`Archived ${snapshot.size} activities`);
+});
+
 
 
 // ——————————————————————————————————
