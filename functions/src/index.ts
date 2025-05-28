@@ -115,7 +115,53 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
   
 });
 
-// 4) Scheduled function: archive past activities once a day
+
+export const onParticipantAdded = onDocumentUpdated('activities/{activityId}', async (event) => {
+  const { activityId } = event.params;
+
+  const before = event.data?.before?.data();
+  const after = event.data?.after?.data();
+
+  if (!before || !after) {
+    console.warn(`onParticipantAdded: missing before/after for ${activityId}`);
+    return;
+  }
+
+  const beforeIds = before.participantIds || [];
+  const afterIds = after.participantIds || [];
+
+  // Compute newly added user IDs
+  const newlyAdded = afterIds.filter((id: string) => !beforeIds.includes(id));
+
+  for (const userId of newlyAdded) {
+    try {
+      console.log('👤 Detected new participant:', userId, 'in activity', activityId);
+
+      const userSnap = await db.doc(`users/${userId}`).get();
+      const userData = userSnap.exists ? userSnap.data()! : {};
+
+      // Add to RTDB members
+      await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).set({
+        joinedAt: Date.now(),
+        name: userData.name || null,
+      });
+
+      // Send system message
+      await rtdb.ref(`chat-messages/${activityId}`).push({
+        senderId: 'system',
+        senderName: 'System',
+        text: `${userData.name || 'A participant'} has joined the chat.`,
+        timestamp: Date.now(),
+        type: 'system',
+      });
+
+      console.log(`✅ Participant ${userId} added to chat for activity ${activityId}`);
+    } catch (err) {
+      console.error(`❌ Failed to add participant ${userId} to chat:`, err);
+    }
+  }
+});
+
 
 // 4) Scheduled function: archive past activities once a day
 export const archivePastActivities = onSchedule('every day 00:00', async () => {
@@ -143,39 +189,6 @@ export const archivePastActivities = onSchedule('every day 00:00', async () => {
 
 
 
-
-export const onParticipantAdded = onDocumentCreated(
-  'activities/{activityId}/participants/{userId}',
-  async (event) => {
-    const { activityId, userId } = event.params;
-    console.log('✅ onParticipantAdded fired for', activityId, userId);
-
-    try {
-      const userSnap = await db.doc(`users/${userId}`).get();
-      const userData = userSnap.exists ? userSnap.data()! : {};
-
-      // Add participant to RTDB members
-      await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).set({
-        joinedAt: Date.now(),
-        name: userData.name || null,
-      });
-
-      // Push system message to chat
-      await rtdb.ref(`chat-messages/${activityId}`).push({
-        senderId: 'system',
-        senderName: 'System',
-        text: `${userData.name || 'A participant'} has joined the chat.`,
-        timestamp: Date.now(),
-        type: 'system',
-      });
-
-      console.log(`✅ Participant ${userId} added and join message sent for chat ${activityId}`);
-    } catch (err) {
-      console.error(`❌ onParticipantAdded error for ${activityId}/${userId}:`, err);
-      throw err;
-    }
-  }
-);
 
 
 
