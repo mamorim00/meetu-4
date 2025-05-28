@@ -143,34 +143,40 @@ export const archivePastActivities = onSchedule('every day 00:00', async () => {
 
 
 
-// ——————————————————————————————————
-// 2) When someone joins (participant subcollection created):
-export const onParticipantAdded = onDocumentUpdated(
+
+export const onParticipantAdded = onDocumentCreated(
   'activities/{activityId}/participants/{userId}',
   async (event) => {
     const { activityId, userId } = event.params;
-    console.log('🐛 onParticipantAdded fired for', activityId, userId);
-    const userSnap = await db.doc(`users/${userId}`).get();
-    const userData = userSnap.exists ? userSnap.data()! : {};
+    console.log('✅ onParticipantAdded fired for', activityId, userId);
 
-    // 2️⃣a Add them into RTDB members
-    await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).set({
-      joinedAt: Date.now(),
-      name:     userData.name || null,
-    });
+    try {
+      const userSnap = await db.doc(`users/${userId}`).get();
+      const userData = userSnap.exists ? userSnap.data()! : {};
 
-    // 2️⃣b Push “X has joined…” system message
-    await rtdb.ref(`chat-messages/${activityId}`).push({
-      senderId:   'system',
-      senderName: 'System',
-      text:       `${userData.name || 'A participant'} has joined the chat.`,
-      timestamp:  Date.now(),
-      type:       'system'
-    });
+      // Add participant to RTDB members
+      await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).set({
+        joinedAt: Date.now(),
+        name: userData.name || null,
+      });
 
-    console.log(`Participant ${userId} added and join message sent for chat ${activityId}`);
+      // Push system message to chat
+      await rtdb.ref(`chat-messages/${activityId}`).push({
+        senderId: 'system',
+        senderName: 'System',
+        text: `${userData.name || 'A participant'} has joined the chat.`,
+        timestamp: Date.now(),
+        type: 'system',
+      });
+
+      console.log(`✅ Participant ${userId} added and join message sent for chat ${activityId}`);
+    } catch (err) {
+      console.error(`❌ onParticipantAdded error for ${activityId}/${userId}:`, err);
+      throw err;
+    }
   }
 );
+
 
 
 // ——————————————————————————————————
