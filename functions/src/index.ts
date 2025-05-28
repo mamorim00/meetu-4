@@ -64,29 +64,39 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
     return;
   }
 
-  // 1️⃣ Add owner to RTDB members
-  if (activity.ownerId) {
-    const ownerSnap = await db.doc(`users/${activity.ownerId}`).get();
-    const ownerData = ownerSnap.exists ? ownerSnap.data()! : {};
+  try {
+    // 🔑 Pull owner info out of your createdBy map
+    const createdBy = activity.createdBy as {
+      userId?: string;
+      displayName?: string;
+    };
+    const ownerId = createdBy?.userId;
+    const ownerName = createdBy?.displayName || null;
 
-    await rtdb.ref(`activity-chats/${activityId}/members/${activity.ownerId}`).set({
-      joinedAt: Date.now(),
-      name:     ownerData.name || null,
-    });
+    if (ownerId) {
+      // 1️⃣ Add owner to RTDB members
+      await rtdb
+        .ref(`activity-chats/${activityId}/members/${ownerId}`)
+        .set({
+          joinedAt: Date.now(),
+          name: ownerName,
+        });
 
-    // 1️⃣a Push “Chat created…” system message
-    await rtdb.ref(`chat-messages/${activityId}`).push({
-      senderId:   'system',
-      senderName: 'System',
-      text:       'Chat created. Welcome! Coordinate with participants here.',
-      timestamp:  Date.now(),
-      type:       'system'
-    });
+      // 1️⃣a Push “Chat created…” system message
+      await rtdb.ref(`chat-messages/${activityId}`).push({
+        senderId: 'system',
+        senderName: 'System',
+        text: 'Chat created. Welcome! Coordinate with participants here.',
+        timestamp: Date.now(),
+        type: 'system',
+      });
 
-    console.log(`Owner ${activity.ownerId} added and welcome message sent for chat ${activityId}`);
-  } else {
-    console.warn(`onActivityCreated: No ownerId for ${activityId}`);
-  }
+      console.log(
+        `Owner ${ownerId} (${ownerName}) added and welcome message sent for chat ${activityId}`
+      );
+    } else {
+      console.warn(`onActivityCreated: No createdBy.userId for ${activityId}`);
+    }
 
   // 2️⃣ Add lowercase title
   if (typeof activity.title === "string") {
@@ -98,7 +108,10 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
     // 3️⃣ Set initial archived flag to false
     await db.doc(`activities/${activityId}`).update({ archived: false });
     console.log(`Set archived=false for activity ${activityId}`);
-
+  } catch (err) {
+    console.error(`onActivityCreated [${activityId}] failed:`, err);
+    throw err; // so the error surfaces in Cloud Functions logs
+  }
   
 });
 
@@ -132,7 +145,7 @@ export const archivePastActivities = onSchedule('every day 00:00', async () => {
 
 // ——————————————————————————————————
 // 2) When someone joins (participant subcollection created):
-export const onParticipantAdded = onDocumentCreated(
+export const onParticipantAdded = onDocumentUpdated(
   'activities/{activityId}/participants/{userId}',
   async (event) => {
     const { activityId, userId } = event.params;
