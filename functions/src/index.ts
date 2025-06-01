@@ -3,6 +3,11 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getDatabase } from 'firebase-admin/database';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { onValueCreated } from "firebase-functions/v2/database";
+import * as admin from "firebase-admin";
+
+// Initialize the Admin SDK _once_
+admin.initializeApp();
 
 // Initialize the Admin SDK
 initializeApp();
@@ -10,6 +15,109 @@ initializeApp();
 // Explicitly grab a Firestore client
 const db = getFirestore();
 const rtdb = getDatabase();
+
+export const sendChatNotification = onValueCreated(
+  {
+    ref: "/chat-messages/{chatId}/{messageId}",
+    // If your project lives in a specific region (e.g. europe-west1),
+    // uncomment the next line and set it accordingly:
+    // region: "europe-west1",
+  },
+  async (event) => {
+    // 1️⃣ Extract path parameters and the new child’s data
+    const chatId = event.params.chatId;
+    const messageSnapshot = event.data;            // DataSnapshot for the new child
+    const messageData = messageSnapshot.val();     // { senderId, senderName, text, timestamp }
+
+    if (!messageData) {
+      console.log("⚠️ No data in new message snapshot; exiting.");
+      return;
+    }
+
+    const senderId = messageData.senderId as string;
+    const text = messageData.text as string;
+    const senderName = (messageData.senderName as string) || "Someone";
+
+    // 2️⃣ Load the Firestore document at activities/{chatId}
+    const firestore = admin.firestore();
+    const activityDocRef = firestore.collection("activities").doc(chatId);
+    const activitySnap = await activityDocRef.get();
+
+    if (!activitySnap.exists) {
+      console.log(`⚠️ No Firestore document for activities/${chatId}. Exiting.`);
+      return;
+    }
+
+    const activityData = activitySnap.data()!;
+    // Expect a field “participants” that is an array of UIDs, e.g. ["uid1", "uid2", …]
+    const participants = (activityData.participants as string[]) || [];
+    if (!Array.isArray(participants) || participants.length === 0) {
+      console.log(`⚠️ "participants" array missing or empty in activities/${chatId}.`);
+      return;
+    }
+
+    // 3️⃣ Build a list of UIDs to notify (exclude the sender)
+    const recipientUids = participants.filter((uid) => uid !== senderId);
+    if (recipientUids.length === 0) {
+      console.log("ℹ️ No one else to notify (sender is only participant). Exiting.");
+      return;
+    }
+
+    // 4️⃣ For each recipient, fetch their FCM token from Firestore userProfiles/{uid}.fcmToken
+    const tokens: string[] = [];
+    const usersCollection = firestore.collection("userProfiles");
+
+    await Promise.all(
+      recipientUids.map(async (uid) => {
+        try {
+          const userDoc = await usersCollection.doc(uid).get();
+          if (!userDoc.exists) {
+            console.log(`⚠️ No userProfiles/${uid} document found.`);
+            return;
+          }
+          const userData = userDoc.data()!;
+          const fcmToken = userData.fcmToken as string | undefined;
+          if (typeof fcmToken === "string" && fcmToken.length > 0) {
+            tokens.push(fcmToken);
+          } else {
+            console.log(`⚠️ No valid fcmToken for userProfiles/${uid}.`);
+          }
+        } catch (err) {
+          console.error(`❌ Error fetching userProfiles/${uid}:`, err);
+        }
+      })
+    );
+
+    if (tokens.length === 0) {
+      console.log("ℹ️ No FCM tokens found for recipients. Exiting.");
+      return;
+    }
+
+    // 5️⃣ Construct the notification payload
+    const truncatedText = text.length > 80 ? text.substring(0, 77) + "…" : text;
+    const payload: admin.messaging.MessagingPayload = {
+      notification: {
+        title: senderName,
+        body: truncatedText,
+        sound: "default",
+      },
+      data: {
+        chatId: chatId,
+      },
+    };
+
+    // 6️⃣ Send the push to all collected tokens
+    try {
+      const response = await admin.messaging().sendToDevice(tokens, payload);
+      console.log(
+        `✅ Notifications sent for chatId=${chatId}. Successes=${response.successCount}, Failures=${response.failureCount}`
+      );
+      // (Optionally inspect response.results to remove invalid tokens from Firestore)
+    } catch (error) {
+      console.error("❌ Error sending FCM notifications:", error);
+    }
+  }
+);
 
 // When a user is created or updated, add a lowercase version of their display name
 export const onUserCreatedOrUpdated = onDocumentUpdated('users/{userId}', async (event) => {
@@ -256,6 +364,8 @@ export const onParticipantRemoved = onDocumentDeleted(
     }
   }
 );
+
+
 
 
 export const onFriendRequestAccepted = onDocumentUpdated(

@@ -18,6 +18,7 @@ export interface UserProfile {
   location?: string;
   interests?: string[];
   friends?: string[];
+  verified?: boolean;
 }
 
 // Define store state
@@ -59,6 +60,7 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
             createdAt: Date.now(),
             lastLoginAt: Date.now(),
             friends: [],
+            verified: false,
           };
     
           await setDoc(userDocRef, newProfile);
