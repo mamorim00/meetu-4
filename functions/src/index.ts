@@ -14,13 +14,16 @@ initializeApp();
 // Explicitly grab a Firestore client
 const db = getFirestore();
 const rtdb = getDatabase();
+
 export const sendChatNotification = onValueCreated(
   {
-    ref: "/chat-messages/{chatId}/{messageId}",
-    // region: "europe-west1",
+    // we push new messages under: /chat-messages/{activityId}/{messageId}
+    ref: "/chat-messages/{activityId}/{messageId}",
+    instance: "meetudatabutton-default-rtdb",  // ✅ Your RTDB instance ID
+    region: "europe-west1",    
   },
   async (event) => {
-    const chatId = event.params.chatId;
+    const activityId = event.params.activityId;
     const messageSnapshot = event.data;
     const messageData = messageSnapshot.val();
 
@@ -33,12 +36,12 @@ export const sendChatNotification = onValueCreated(
     const text = messageData.text as string;
     const senderName = (messageData.senderName as string) || "Someone";
 
-    // ✅ Use already initialized Firestore client
-    const activityDocRef = db.collection("activities").doc(chatId);
+    // Look up the corresponding Firestore "activity" document so we can fetch its participants
+    const activityDocRef = db.collection("activities").doc(activityId);
     const activitySnap = await activityDocRef.get();
 
     if (!activitySnap.exists) {
-      console.log(`⚠️ No Firestore document for activities/${chatId}. Exiting.`);
+      console.log(`⚠️ No Firestore document for activities/${activityId}. Exiting.`);
       return;
     }
 
@@ -46,10 +49,13 @@ export const sendChatNotification = onValueCreated(
     const participants = (activityData.participants as string[]) || [];
 
     if (!Array.isArray(participants) || participants.length === 0) {
-      console.log(`⚠️ "participants" array missing or empty in activities/${chatId}.`);
+      console.log(
+        `⚠️ "participants" array missing or empty in activities/${activityId}. Exiting.`
+      );
       return;
     }
 
+    // Notify everyone except the sender
     const recipientUids = participants.filter((uid) => uid !== senderId);
     if (recipientUids.length === 0) {
       console.log("ℹ️ No one else to notify (sender is only participant). Exiting.");
@@ -59,6 +65,7 @@ export const sendChatNotification = onValueCreated(
     const tokens: string[] = [];
     const usersCollection = db.collection("userProfiles");
 
+    // Fetch each recipient’s FCM token
     await Promise.all(
       recipientUids.map(async (uid) => {
         try {
@@ -85,6 +92,7 @@ export const sendChatNotification = onValueCreated(
       return;
     }
 
+    // Truncate long messages
     const truncatedText = text.length > 80 ? text.substring(0, 77) + "…" : text;
     const payload: admin.messaging.MessagingPayload = {
       notification: {
@@ -93,14 +101,14 @@ export const sendChatNotification = onValueCreated(
         sound: "default",
       },
       data: {
-        chatId: chatId,
+        activityId: activityId,
       },
     };
 
     try {
       const response = await admin.messaging().sendToDevice(tokens, payload);
       console.log(
-        `✅ Notifications sent for chatId=${chatId}. Successes=${response.successCount}, Failures=${response.failureCount}`
+        `✅ Notifications sent for activityId=${activityId}. Successes=${response.successCount}, Failures=${response.failureCount}`
       );
     } catch (error) {
       console.error("❌ Error sending FCM notifications:", error);
