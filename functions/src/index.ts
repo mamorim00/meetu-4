@@ -46,17 +46,18 @@ export const sendChatNotification = onValueCreated(
     }
 
     const activityData = activitySnap.data()!;
-    const participants = (activityData.participants as string[]) || [];
+    const 
+    participantIds = (activityData.participantIds as string[]) || [];
 
-    if (!Array.isArray(participants) || participants.length === 0) {
+    if (!Array.isArray(participantIds) || participantIds.length === 0) {
       console.log(
-        `⚠️ "participants" array missing or empty in activities/${activityId}. Exiting.`
+        `⚠️ "participantIds" array missing or empty in activities/${activityId}. Exiting.`
       );
       return;
     }
 
     // Notify everyone except the sender
-    const recipientUids = participants.filter((uid) => uid !== senderId);
+    const recipientUids = participantIds.filter((uid) => uid !== senderId);
     if (recipientUids.length === 0) {
       console.log("ℹ️ No one else to notify (sender is only participant). Exiting.");
       return;
