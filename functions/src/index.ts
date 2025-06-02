@@ -3,81 +3,93 @@
 // 1) Firestore triggers
 import { onDocumentUpdated, onDocumentCreated, onDocumentDeleted } from "firebase-functions/v2/firestore";
 
-// 2) Realtime Database trigger
-import { onValueCreated } from "firebase-functions/v2/database";
 
 // 3) Scheduled triggers
 import { onSchedule } from "firebase-functions/v2/scheduler";
 
 // 4) Firebase-Admin imports
 //    We will use a single admin.initializeApp(...) call instead of mixing modular vs. namespaced.
-import * as admin from "firebase-admin";
+
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getDatabase } from "firebase-admin/database";
 
-import { initializeApp } from 'firebase-admin/app';
+//import { initializeApp } from 'firebase-admin/app';
+// ────────────────────────────────────────────────────────────────────
+// 1) Import the v2 “onValueCreated” trigger, plus Firestore + RTDB Admin SDKs
+// ────────────────────────────────────────────────────────────────────
+import { onValueCreated } from "firebase-functions/v2/database";
+import * as admin from "firebase-admin";
 
 
 
-
-
-
-// ────────────────────────────────────────────────────────────────────────────
-// ── Initialize the entire Admin SDK exactly once, for Firestore, RTDB, Messaging, etc.
-// ────────────────────────────────────────────────────────────────────────────
-initializeApp();
-
-//var admin = require("firebase-admin");
-
-var serviceAccount = require("path/to/serviceAccountKey.json");
-
+// ────────────────────────────────────────────────────────────────────
+// 2) Initialize the Admin SDK exactly once
+//    • We point to our serviceAccount key JSON and our RTDB URL.
+//    • After this call, you can use admin.firestore() and admin.database().
+// ────────────────────────────────────────────────────────────────────
+const serviceAccount = require("./serviceAccountKey.json");
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   databaseURL: "https://meetudatabutton-default-rtdb.europe-west1.firebasedatabase.app"
 });
 
+// ────────────────────────────────────────────────────────────────────
+// 3) Grab Firestore + Realtime Database references
+// ────────────────────────────────────────────────────────────────────
+const db = getFirestore();         // Firestore client
+const rtdb = getDatabase();        // Realtime Database client
 
-// Now grab Firestore and RTDB clients from Admin:
-const db = getFirestore();
-const rtdb = getDatabase();
-
-
-// ────────────────────────────────────────────────────────────────────────────
-// ── 1) sendChatNotification: fires whenever a new child is created under /chat-messages/{activityId}/{messageId}
-// ────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────
+// 4) Cloud Function: sendChatNotification
+//
+// This runs “onValueCreated” under:
+//    /chat-messages/{activityId}/{messageId}
+// whenever a new message is pushed.
+// ────────────────────────────────────────────────────────────────────
 export const sendChatNotification = onValueCreated(
   {
-    // we push new messages under: /chat-messages/{activityId}/{messageId}
-    ref: '/chat-messages/{activityId}/{messageId}',
-    instance: 'meetudatabutton-default-rtdb', // Your RTDB instance ID
-    region: 'europe-west1',
+    // a) RTDB path to watch
+    ref: "/chat-messages/{activityId}/{messageId}",
+    // b) Make sure to specify your RTDB instance ID (the “instance” is the part
+    //    before “.firebaseio.com”). In your case it’s “meetudatabutton-default-rtdb”.
+    instance: "meetudatabutton-default-rtdb",
+    // c) Region for your function
+    region: "europe-west1",
   },
   async (event) => {
-    const activityId = event.params.activityId;
-    const messageSnapshot = event.data;
-    const messageData = messageSnapshot.val();
+    // ─────────────────────────────────────────────────────────────────────
+    // 4.1) Extract path params and snapshot
+    // ─────────────────────────────────────────────────────────────────────
+    const activityId = event.params.activityId;        // {activityId}
+    const messageSnapshot = event.data;                // DataSnapshot
+    const messageData = messageSnapshot.val();         // { senderId, senderName?, text?, ... }
 
-    console.log(`📥 New message under activityId=${activityId}. messageId=${messageSnapshot.key}`, {
-      messageData,
-    });
+    console.log(
+      `📥 New RTDB child under /chat-messages/${activityId}/${messageSnapshot.key}`,
+      messageData
+    );
 
+    // 4.2) Guard: must have “text” as a non-empty string
     if (!messageData) {
-      console.log('⚠️ No data in new message snapshot; exiting.');
+      console.log("⚠️ No data in messageSnapshot; exiting.");
       return;
     }
-    if (typeof messageData.text !== 'string' || messageData.text.trim() === '') {
-      console.log('⚠️ Message text is missing, not a string, or empty. Exiting.');
+    if (typeof messageData.text !== "string" || messageData.text.trim() === "") {
+      console.log("⚠️ messageData.text missing/empty; no push sent.");
       return;
     }
 
+    // 4.3) Extract senderId, senderName (fallback “Someone”), text
     const senderId = messageData.senderId as string;
     const text = messageData.text as string;
-    const senderName = (messageData.senderName as string) || 'Someone';
-    console.log('ℹ️ Parsed messageData fields', { senderId, senderName, textLength: text?.length });
+    const senderName = (messageData.senderName as string) || "Someone";
 
-    // Fetch the corresponding Firestore "activity" document
-    const activityDocRef = db.collection('activities').doc(activityId);
-    console.log(`🔍 Fetching Firestore document for activities/${activityId}`);
+    console.log("ℹ️ Parsed message fields:", { senderId, senderName, textLength: text.length });
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 4.4) Fetch corresponding Firestore document “activities/{activityId}”
+    // ─────────────────────────────────────────────────────────────────────
+    const activityDocRef = db.collection("activities").doc(activityId);
     let activitySnap;
     try {
       activitySnap = await activityDocRef.get();
@@ -87,57 +99,56 @@ export const sendChatNotification = onValueCreated(
     }
 
     if (!activitySnap.exists) {
-      console.log(`⚠️ No Firestore document for activities/${activityId}. Exiting.`);
+      console.log(`⚠️ Firestore doc “activities/${activityId}” does not exist; exiting.`);
       return;
     }
-
     const activityData = activitySnap.data()!;
-    console.log('✅ Fetched activityData', activityData);
+    console.log("✅ Fetched Firestore activityData:", activityData);
 
+    // 4.5) Expect “participantIds” to be an array of UIDs, e.g. [ "uidA", "uidB", ... ]
     const participantIds = (activityData.participantIds as string[]) || [];
-    console.log(`ℹ️ participantIds from activity ${activityId}:`, participantIds);
-
     if (!Array.isArray(participantIds) || participantIds.length === 0) {
-      console.log(
-        `⚠️ "participantIds" array missing or empty in activities/${activityId}. Exiting.`
-      );
+      console.log(`⚠️ No “participantIds” array found in activities/${activityId}; exiting.`);
       return;
     }
+    console.log(`ℹ️ participantIds for ${activityId}:`, participantIds);
 
-    // Notify everyone except the sender
+    // 4.6) Filter out the sender
     const recipientUids = participantIds.filter((uid) => uid !== senderId);
-    console.log('ℹ️ Computed recipientUids (excluding sender):', recipientUids);
     if (recipientUids.length === 0) {
-      console.log('ℹ️ No one else to notify (sender is only participant). Exiting.');
+      console.log("ℹ️ Sender is the only participant; no notifications to send. Exiting.");
       return;
     }
+    console.log("ℹ️ recipientUids:", recipientUids);
 
+    // ─────────────────────────────────────────────────────────────────────
+    // 4.7) For each recipient UID, look up “userProfiles/{uid}” to get fcmToken + webFcmToken
+    // ─────────────────────────────────────────────────────────────────────
     const tokens: string[] = [];
-    const usersCollection = db.collection('userProfiles');
+    const usersCollection = db.collection("userProfiles");
 
-    // Fetch each recipient’s FCM token(s)
     await Promise.all(
       recipientUids.map(async (uid) => {
-        console.log(`🔍 Fetching userProfiles/${uid}`);
         try {
+          console.log(`🔍 Fetching userProfiles/${uid}`);
           const userDoc = await usersCollection.doc(uid).get();
           if (!userDoc.exists) {
             console.log(`⚠️ No userProfiles/${uid} document found.`);
             return;
           }
+
           const userData = userDoc.data()!;
-          
-          // 1) Mobile token (iOS/Android)
+          // a) Mobile token
           const fcmToken = userData.fcmToken as string | undefined;
-          if (typeof fcmToken === 'string' && fcmToken.length > 0) {
+          if (typeof fcmToken === "string" && fcmToken.length > 0) {
             tokens.push(fcmToken);
           } else {
             console.log(`ℹ️ No mobile fcmToken for userProfiles/${uid}.`);
           }
 
-          // 2) Web token
+          // b) Web token (if you support web pushes)
           const webFcmToken = userData.webFcmToken as string | undefined;
-          if (typeof webFcmToken === 'string' && webFcmToken.length > 0) {
+          if (typeof webFcmToken === "string" && webFcmToken.length > 0) {
             tokens.push(webFcmToken);
           } else {
             console.log(`ℹ️ No webFcmToken for userProfiles/${uid}.`);
@@ -148,40 +159,48 @@ export const sendChatNotification = onValueCreated(
       })
     );
 
-    console.log('ℹ️ Final tokens array:', tokens);
+    console.log("ℹ️ All tokens collected:", tokens);
     if (tokens.length === 0) {
-      console.log('ℹ️ No FCM tokens found for recipients. Exiting.');
+      console.log("ℹ️ No FCM tokens found for any recipient; exiting.");
       return;
     }
 
-    // Truncate long messages
-    const truncatedText = text.length > 80 ? text.substring(0, 77) + '…' : text;
-    console.log('ℹ️ Truncated notification body:', truncatedText);
+    // ─────────────────────────────────────────────────────────────────────
+    // 4.8) Truncate the text for the notification body if it’s too long
+    // ─────────────────────────────────────────────────────────────────────
+    const truncatedText = text.length > 80 ? text.substring(0, 77) + "…" : text;
+    console.log("ℹ️ Truncated notification body:", truncatedText);
 
+    // ─────────────────────────────────────────────────────────────────────
+    // 4.9) Create the FCM payload (title = senderName, body = truncatedText)
+    // ─────────────────────────────────────────────────────────────────────
     const payload: admin.messaging.MessagingPayload = {
       notification: {
         title: senderName,
         body: truncatedText,
-        sound: 'default',
+        sound: "default",
       },
       data: {
         activityId: activityId,
       },
     };
-    console.log('ℹ️ Prepared FCM payload:', payload);
+    console.log("ℹ️ Prepared FCM payload:", payload);
 
+    // ─────────────────────────────────────────────────────────────────────
+    // 4.10) Send a multicast FCM message
+    // ─────────────────────────────────────────────────────────────────────
     try {
       const response = await admin.messaging().sendToDevice(tokens, payload);
       console.log(
         `✅ Notifications sent for activityId=${activityId}.`,
         {
-          successes: response.successCount,
-          failures: response.failureCount,
+          successCount: response.successCount,
+          failureCount: response.failureCount,
           results: response.results,
         }
       );
-    } catch (error) {
-      console.error('❌ Error sending FCM notifications:', error);
+    } catch (err) {
+      console.error("❌ Error sending FCM notifications:", err);
     }
   }
 );
