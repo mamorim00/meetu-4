@@ -10,14 +10,14 @@ import { getMessaging, Messaging } from 'firebase/messaging';
 
 // Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyDuWyFzPQGpgw8-WKMPjnHBfTTgFXe1ZkQ",
-  authDomain: "meetu-23587.firebaseapp.com",
-  projectId: "meetu-23587",
-  storageBucket: "meetu-23587.appspot.com",
-  messagingSenderId: "329099428437",
-  appId: "1:329099428437:web:e8aa7f69cbfb22f1c1bcdc",
-  measurementId: "G-8BVL7NC3MV",
-  databaseURL: "https://meetudatabutton-default-rtdb.europe-west1.firebasedatabase.app"
+  apiKey: "AIzaSyCDmreq2cbBXfz8DjfzHo4hPmj723-DarA",
+  authDomain: "meetudatabutton.firebaseapp.com",
+  databaseURL: "https://meetudatabutton-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "meetudatabutton",
+  storageBucket: "meetudatabutton.firebasestorage.app",
+  messagingSenderId: "277235281840",
+  appId: "1:277235281840:web:94db26556b18afacc7b075",
+  measurementId: "G-VZCFSE58NL"
 };
 
 //
