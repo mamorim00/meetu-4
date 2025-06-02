@@ -19,180 +19,124 @@ import * as admin from "firebase-admin";
 // ────────────────────────────────────────────────────────────────────────────
 const serviceAccount = require("../serviceAccountKey.json");
 const PROJECT_ID = "meetudatabutton-default";
-
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   projectId: PROJECT_ID,
   databaseURL: "https://meetudatabutton-default-rtdb.europe-west1.firebasedatabase.app"
 });
 
-// ────────────────────────────────────────────────────────────────────────────
-// Grab Firestore + Realtime Database references
-// ────────────────────────────────────────────────────────────────────────────
-const db = getFirestore();   // Firestore client
-const rtdb = getDatabase();  // Realtime Database client
+const db = getFirestore();
+const rtdb = getDatabase();
 
-// ────────────────────────────────────────────────────────────────────────────
-// Cloud Function: sendChatNotification
-//
-// Listens for new children under:
-//    /chat-messages/{activityId}/{messageId}
-// and sends an FCM multicast to all other participants.
-// ────────────────────────────────────────────────────────────────────────────
 export const sendChatNotification = onValueCreated(
   {
-    // a) RTDB path to watch
     ref: "/chat-messages/{activityId}/{messageId}",
-    // b) RTDB instance ID (the part before “.firebaseio.com”)
     instance: "meetudatabutton-default-rtdb",
-    // c) Region for this function
     region: "europe-west1",
   },
   async (event) => {
-    // 4.1) Extract path params and snapshot
-    const activityId = event.params.activityId;         // {activityId}
-    const messageSnapshot = event.data;                 // DataSnapshot
-    const messageData = messageSnapshot.val();          // { senderId, senderName?, text?, ... }
+    const activityId = event.params.activityId;
+    const messageSnapshot = event.data;
+    const messageData = messageSnapshot.val();
 
-    console.log(
-      `📥 New RTDB child under /chat-messages/${activityId}/${messageSnapshot.key}`,
-      messageData
-    );
-
-    // 4.2) Guard: ensure text is a non-empty string
-    if (!messageData) {
-      console.log("⚠️ No data in messageSnapshot; exiting.");
-      return;
-    }
-    if (typeof messageData.text !== "string" || messageData.text.trim() === "") {
-      console.log("⚠️ messageData.text missing/empty; no push sent.");
+    if (
+      !messageData ||
+      typeof messageData.text !== "string" ||
+      messageData.text.trim() === ""
+    ) {
+      console.log("⚠️ No valid text field; exiting.");
       return;
     }
 
-    // 4.3) Extract senderId, senderName (fallback “Someone”), text
     const senderId = messageData.senderId as string;
     const text = messageData.text as string;
     const senderName = (messageData.senderName as string) || "Someone";
+    const truncatedText =
+      text.length > 80 ? text.substring(0, 77) + "…" : text;
 
-    console.log("ℹ️ Parsed message fields:", { senderId, senderName, textLength: text.length });
-
-    // 4.4) Fetch corresponding Firestore document “activities/{activityId}”
-    const activityDocRef = db.collection("activities").doc(activityId);
-    let activitySnap;
-    try {
-      activitySnap = await activityDocRef.get();
-    } catch (err) {
-      console.error(`❌ Error reading activities/${activityId} from Firestore:`, err);
-      return;
-    }
-
+    // 1) Fetch Firestore “activities/{activityId}”
+    const activitySnap = await db
+      .collection("activities")
+      .doc(activityId)
+      .get();
     if (!activitySnap.exists) {
-      console.log(`⚠️ Firestore doc “activities/${activityId}” does not exist; exiting.`);
+      console.log(`⚠️ No activities/${activityId} doc; exiting.`);
       return;
     }
     const activityData = activitySnap.data()!;
-    console.log("✅ Fetched Firestore activityData:", activityData);
-
-    // 4.5) Expect “participantIds” to be an array of UIDs
     const participantIds = (activityData.participantIds as string[]) || [];
-    if (!Array.isArray(participantIds) || participantIds.length === 0) {
-      console.log(`⚠️ No “participantIds” array found in activities/${activityId}; exiting.`);
-      return;
-    }
-    console.log(`ℹ️ participantIds for ${activityId}:`, participantIds);
-
-    // 4.6) Filter out the sender
     const recipientUids = participantIds.filter((uid) => uid !== senderId);
     if (recipientUids.length === 0) {
-      console.log("ℹ️ Sender is the only participant; no notifications to send. Exiting.");
+      console.log("ℹ️ No other participants; exiting.");
       return;
     }
-    console.log("ℹ️ recipientUids:", recipientUids);
 
-    // 4.7) For each recipient UID, look up “userProfiles/{uid}” to get fcmToken + webFcmToken
+    // 2) Collect all tokens
     const tokens: string[] = [];
     const usersCollection = db.collection("userProfiles");
 
     await Promise.all(
       recipientUids.map(async (uid) => {
         try {
-          console.log(`🔍 Fetching userProfiles/${uid}`);
           const userDoc = await usersCollection.doc(uid).get();
-          if (!userDoc.exists) {
-            console.log(`⚠️ No userProfiles/${uid} document found.`);
-            return;
-          }
-
+          if (!userDoc.exists) return;
           const userData = userDoc.data()!;
-          // a) Mobile token
           const fcmToken = userData.fcmToken as string | undefined;
-          if (typeof fcmToken === "string" && fcmToken.length > 0) {
-            tokens.push(fcmToken);
-          } else {
-            console.log(`ℹ️ No mobile fcmToken for userProfiles/${uid}.`);
-          }
-
-          // b) Web token
+          if (fcmToken) tokens.push(fcmToken);
           const webFcmToken = userData.webFcmToken as string | undefined;
-          if (typeof webFcmToken === "string" && webFcmToken.length > 0) {
-            tokens.push(webFcmToken);
-          } else {
-            console.log(`ℹ️ No webFcmToken for userProfiles/${uid}.`);
-          }
+          if (webFcmToken) tokens.push(webFcmToken);
         } catch (err) {
           console.error(`❌ Error fetching userProfiles/${uid}:`, err);
         }
       })
     );
-
-    console.log("ℹ️ All tokens collected:", tokens);
     if (tokens.length === 0) {
-      console.log("ℹ️ No FCM tokens found for any recipient; exiting.");
+      console.log("ℹ️ No tokens found; exiting.");
       return;
     }
 
-    // 4.8) Truncate the text for the notification body if it’s too long
-    const truncatedText = text.length > 80 ? text.substring(0, 77) + "…" : text;
-    console.log("ℹ️ Truncated notification body:", truncatedText);
-
-    // 4.9) Prepare notification + data payload for sendMulticast()
-    const payloadNotification = {
-      title: senderName,
-      body: truncatedText,
-      sound: "default",
-    };
-    const payloadData = {
-      activityId: activityId,
-    };
-
-    console.log("ℹ️ Prepared FCM notification & data:", {
-      notification: payloadNotification,
-      data: payloadData,
+    // 3) Send individual messages with messaging().send()
+    const sendPromises = tokens.map((token) => {
+      const message: admin.messaging.Message = {
+        token: token,
+        notification: {
+          title: senderName,
+          body: truncatedText,
+        },
+        data: {
+          activityId: activityId,
+        },
+        android: {
+          notification: { sound: "default" },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: "default",
+            },
+          },
+        },
+      };
+      return admin.messaging().send(message);
     });
 
-    // 4.10) Send a multicast FCM message (HTTP v1)
     try {
-      const multicastResponse = await admin.messaging().sendMulticast({
-        tokens: tokens,
-        notification: payloadNotification,
-        data: payloadData,
-      });
-
+      const results = await Promise.allSettled(sendPromises);
+      const successCount = results.filter(r => r.status === "fulfilled").length;
+      const failureCount = results.length - successCount;
       console.log(
-        `✅ Notifications sent for activityId=${activityId}.`,
-        {
-          successCount: multicastResponse.successCount,
-          failureCount: multicastResponse.failureCount,
-          // Optionally inspect multicastResponse.responses for per-token errors
-        }
+        `✅ send() completed. Success: ${successCount}, Failures: ${failureCount}`
       );
+      results.forEach((r, idx) => {
+        if (r.status === "rejected") {
+          console.warn(`❌ Token[${idx}] failed:`, (r as PromiseRejectedResult).reason);
+        }
+      });
     } catch (err) {
-      console.error("❌ Error sending FCM notifications:", err);
+      console.error("❌ Unexpected error during send():", err);
     }
   }
 );
-
-
 
 // ────────────────────────────────────────────────────────────────────────────
 // ── 2) onUserCreatedOrUpdated: lowercases displayName whenever a user document is updated
