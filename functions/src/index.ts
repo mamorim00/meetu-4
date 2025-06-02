@@ -42,65 +42,59 @@ const rtdb = getDatabase();
 //    /chat-messages/{activityId}/{messageId}
 // and sends an FCM multicast to all other participants.
 // ────────────────────────────────────────────────────────────────────────────
+
 export const sendChatNotification = onValueCreated(
   {
     ref: "/chat-messages/{activityId}/{messageId}",
     instance: "meetudatabutton-default-rtdb",
-    region: "europe-west1",
+    region:    "europe-west1",
   },
   async (event) => {
     const activityId = event.params.activityId;
-    const messageSnapshot = event.data;
-    const messageData = messageSnapshot.val();
-
+    const messageData = event.data.val();
     if (
       !messageData ||
       typeof messageData.text !== "string" ||
       messageData.text.trim() === ""
     ) {
-      console.log("⚠️ No valid text field; exiting.");
+      console.log("⚠️ No valid text; exiting.");
       return;
     }
 
-    const senderId = messageData.senderId as string;
-    const text = messageData.text as string;
+    const senderId   = messageData.senderId as string;
+    const fullText   = messageData.text as string;
     const senderName = (messageData.senderName as string) || "Someone";
     const truncatedText =
-      text.length > 80 ? text.substring(0, 77) + "…" : text;
+      fullText.length > 80 ? fullText.substring(0, 77) + "…" : fullText;
 
-    // 1) Fetch Firestore “activities/{activityId}”
-    const activitySnap = await db
-      .collection("activities")
-      .doc(activityId)
-      .get();
+    // 1) Load the Activity document to get participantIds
+    const activitySnap = await db.collection("activities").doc(activityId).get();
     if (!activitySnap.exists) {
-      console.log(`⚠️ No activities/${activityId} doc; exiting.`);
+      console.log(`⚠️ activities/${activityId} missing; exiting.`);
       return;
     }
     const activityData = activitySnap.data()!;
     const participantIds = (activityData.participantIds as string[]) || [];
-    const recipientUids = participantIds.filter((uid) => uid !== senderId);
+    const recipientUids  = participantIds.filter((uid) => uid !== senderId);
     if (recipientUids.length === 0) {
       console.log("ℹ️ No other participants; exiting.");
       return;
     }
 
-    // 2) Collect all tokens
+    // 2) Gather FCM tokens for each recipient
     const tokens: string[] = [];
-    const usersCollection = db.collection("userProfiles");
-
     await Promise.all(
       recipientUids.map(async (uid) => {
         try {
-          const userDoc = await usersCollection.doc(uid).get();
+          const userDoc = await db.collection("userProfiles").doc(uid).get();
           if (!userDoc.exists) return;
           const userData = userDoc.data()!;
-          const fcmToken = userData.fcmToken as string | undefined;
-          if (fcmToken) tokens.push(fcmToken);
+          const fcmToken    = userData.fcmToken as string | undefined;
           const webFcmToken = userData.webFcmToken as string | undefined;
+          if (fcmToken) tokens.push(fcmToken);
           if (webFcmToken) tokens.push(webFcmToken);
         } catch (err) {
-          console.error(`❌ Error fetching userProfiles/${uid}:`, err);
+          console.error(`❌ error fetching userProfiles/${uid}:`, err);
         }
       })
     );
@@ -109,37 +103,43 @@ export const sendChatNotification = onValueCreated(
       return;
     }
 
-    // 3) Send individual messages with messaging().send()
+    // 3) Optional: compute a dynamic badge count
+    // For simplicity, we’ll just send badge=1. If you want to show “total unread”:
+    // you could query Firestore for unread‐count and set badgeCount accordingly.
+    const badgeCount = 1;
+
+    // 4) Build and send the notification to each token
     const sendPromises = tokens.map((token) => {
       const message: admin.messaging.Message = {
         token: token,
         notification: {
           title: senderName,
-          body: truncatedText,
+          body:  truncatedText,
         },
         data: {
           activityId: activityId,
         },
         android: {
-          notification: { sound: "default" },
+          notification: { sound: "default" }
         },
         apns: {
           payload: {
             aps: {
               sound: "default",
-            },
-          },
-        },
+              badge: badgeCount,
+            }
+          }
+        }
       };
       return admin.messaging().send(message);
     });
 
     try {
       const results = await Promise.allSettled(sendPromises);
-      const successCount = results.filter(r => r.status === "fulfilled").length;
+      const successCount = results.filter((r) => r.status === "fulfilled").length;
       const failureCount = results.length - successCount;
       console.log(
-        `✅ send() completed. Success: ${successCount}, Failures: ${failureCount}`
+        `✅ send() done. Success: ${successCount}, Failures: ${failureCount}`
       );
       results.forEach((r, idx) => {
         if (r.status === "rejected") {
@@ -151,7 +151,6 @@ export const sendChatNotification = onValueCreated(
     }
   }
 );
-
 // ────────────────────────────────────────────────────────────────────────────
 // ── 2) onUserCreatedOrUpdated: lowercases displayName whenever a user document is updated
 // ────────────────────────────────────────────────────────────────────────────
