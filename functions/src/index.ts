@@ -25,7 +25,7 @@ import { initializeApp } from 'firebase-admin/app';
 // ────────────────────────────────────────────────────────────────────────────
 // ── Initialize the entire Admin SDK exactly once, for Firestore, RTDB, Messaging, etc.
 // ────────────────────────────────────────────────────────────────────────────
-initializeApp({ projectId: "meetudatabutton" });
+initializeApp();
 
 // Now grab Firestore and RTDB clients from Admin:
 const db = getFirestore();
