@@ -115,18 +115,28 @@ export const sendChatNotification = onValueCreated(
             return;
           }
           const userData = userDoc.data()!;
+    
+          // 1) iOS/Android token
           const fcmToken = userData.fcmToken as string | undefined;
-          console.log(`ℹ️ userProfiles/${uid}.fcmToken =`, fcmToken);
-          if (typeof fcmToken === "string" && fcmToken.length > 0) {
+          if (typeof fcmToken === 'string' && fcmToken.length > 0) {
             tokens.push(fcmToken);
           } else {
-            console.log(`⚠️ No valid fcmToken for userProfiles/${uid}.`);
+            console.log(`ℹ️ No mobile fcmToken for userProfiles/${uid}.`);
+          }
+    
+          // 2) Web token
+          const webFcmToken = userData.webFcmToken as string | undefined;
+          if (typeof webFcmToken === 'string' && webFcmToken.length > 0) {
+            tokens.push(webFcmToken);
+          } else {
+            console.log(`ℹ️ No webFcmToken for userProfiles/${uid}.`);
           }
         } catch (err) {
           console.error(`❌ Error fetching userProfiles/${uid}:`, err);
         }
       })
     );
+    
 
     console.log("ℹ️ Final tokens array:", tokens);
     if (tokens.length === 0) {
