@@ -14,7 +14,6 @@ initializeApp();
 // Explicitly grab a Firestore client
 const db = getFirestore();
 const rtdb = getDatabase();
-
 export const sendChatNotification = onValueCreated(
   {
     // we push new messages under: /chat-messages/{activityId}/{messageId}
@@ -23,22 +22,37 @@ export const sendChatNotification = onValueCreated(
     region: "europe-west1",    
   },
   async (event) => {
+    
     const activityId = event.params.activityId;
     const messageSnapshot = event.data;
     const messageData = messageSnapshot.val();
+
+    // Log the snapshot key and raw data for the new message
+    console.log(`📥 New message under activityId=${activityId}. messageId=${messageSnapshot.key}`, {
+      messageData,
+    });
 
     if (!messageData) {
       console.log("⚠️ No data in new message snapshot; exiting.");
       return;
     }
 
+    // Log individual fields from messageData (if they exist)
     const senderId = messageData.senderId as string;
     const text = messageData.text as string;
     const senderName = (messageData.senderName as string) || "Someone";
+    console.log("ℹ️ Parsed messageData fields", { senderId, senderName, textLength: text?.length });
 
     // Look up the corresponding Firestore "activity" document so we can fetch its participants
     const activityDocRef = db.collection("activities").doc(activityId);
-    const activitySnap = await activityDocRef.get();
+    console.log(`🔍 Fetching Firestore document for activities/${activityId}`);
+    let activitySnap;
+    try {
+      activitySnap = await activityDocRef.get();
+    } catch (err) {
+      console.error(`❌ Error reading activities/${activityId} from Firestore:`, err);
+      return;
+    }
 
     if (!activitySnap.exists) {
       console.log(`⚠️ No Firestore document for activities/${activityId}. Exiting.`);
@@ -46,8 +60,10 @@ export const sendChatNotification = onValueCreated(
     }
 
     const activityData = activitySnap.data()!;
-    const 
-    participantIds = (activityData.participantIds as string[]) || [];
+    console.log("✅ Fetched activityData", activityData);
+
+    const participantIds = (activityData.participantIds as string[]) || [];
+    console.log(`ℹ️ participantIds from activity ${activityId}:`, participantIds);
 
     if (!Array.isArray(participantIds) || participantIds.length === 0) {
       console.log(
@@ -58,6 +74,7 @@ export const sendChatNotification = onValueCreated(
 
     // Notify everyone except the sender
     const recipientUids = participantIds.filter((uid) => uid !== senderId);
+    console.log("ℹ️ Computed recipientUids (excluding sender):", recipientUids);
     if (recipientUids.length === 0) {
       console.log("ℹ️ No one else to notify (sender is only participant). Exiting.");
       return;
@@ -69,6 +86,7 @@ export const sendChatNotification = onValueCreated(
     // Fetch each recipient’s FCM token
     await Promise.all(
       recipientUids.map(async (uid) => {
+        console.log(`🔍 Fetching userProfiles/${uid}`);
         try {
           const userDoc = await usersCollection.doc(uid).get();
           if (!userDoc.exists) {
@@ -77,6 +95,7 @@ export const sendChatNotification = onValueCreated(
           }
           const userData = userDoc.data()!;
           const fcmToken = userData.fcmToken as string | undefined;
+          console.log(`ℹ️ userProfiles/${uid}.fcmToken =`, fcmToken);
           if (typeof fcmToken === "string" && fcmToken.length > 0) {
             tokens.push(fcmToken);
           } else {
@@ -88,6 +107,7 @@ export const sendChatNotification = onValueCreated(
       })
     );
 
+    console.log("ℹ️ Final tokens array:", tokens);
     if (tokens.length === 0) {
       console.log("ℹ️ No FCM tokens found for recipients. Exiting.");
       return;
@@ -95,6 +115,8 @@ export const sendChatNotification = onValueCreated(
 
     // Truncate long messages
     const truncatedText = text.length > 80 ? text.substring(0, 77) + "…" : text;
+    console.log("ℹ️ Truncated notification body:", truncatedText);
+
     const payload: admin.messaging.MessagingPayload = {
       notification: {
         title: senderName,
@@ -105,11 +127,17 @@ export const sendChatNotification = onValueCreated(
         activityId: activityId,
       },
     };
+    console.log("ℹ️ Prepared FCM payload:", payload);
 
     try {
       const response = await admin.messaging().sendToDevice(tokens, payload);
       console.log(
-        `✅ Notifications sent for activityId=${activityId}. Successes=${response.successCount}, Failures=${response.failureCount}`
+        `✅ Notifications sent for activityId=${activityId}.`,
+        {
+          successes: response.successCount,
+          failures: response.failureCount,
+          results: response.results,
+        }
       );
     } catch (error) {
       console.error("❌ Error sending FCM notifications:", error);
