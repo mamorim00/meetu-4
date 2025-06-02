@@ -17,17 +17,31 @@ import * as admin from "firebase-admin";
 // ────────────────────────────────────────────────────────────────────────────
 // Initialize the Admin SDK exactly once
 // ────────────────────────────────────────────────────────────────────────────
-const serviceAccount = require("../serviceAccountKey.json");
-const PROJECT_ID = "meetudatabutton-default";
+//const serviceAccount = require("../serviceAccountKey.json");
+//const PROJECT_ID = "meetudatabutton-default";
+
+// ────────────────────────────────────────────────────────────────────────────
+// Initialize the Admin SDK exactly once, using default credentials.
+// In Cloud Functions, this picks up the built-in service account
+// that already has Firestore/RTDB/FCM permissions.
+// ────────────────────────────────────────────────────────────────────────────
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  projectId: PROJECT_ID,
   databaseURL: "https://meetudatabutton-default-rtdb.europe-west1.firebasedatabase.app"
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// Grab Firestore + Realtime Database references
+// ────────────────────────────────────────────────────────────────────────────
 const db = getFirestore();
 const rtdb = getDatabase();
 
+// ────────────────────────────────────────────────────────────────────────────
+// Cloud Function: sendChatNotification
+//
+// Listens for new children under:
+//    /chat-messages/{activityId}/{messageId}
+// and sends an FCM multicast to all other participants.
+// ────────────────────────────────────────────────────────────────────────────
 export const sendChatNotification = onValueCreated(
   {
     ref: "/chat-messages/{activityId}/{messageId}",
