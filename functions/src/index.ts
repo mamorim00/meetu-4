@@ -533,3 +533,5 @@ async function deleteChat(activityId: string) {
   // Remove members list
   await rtdb.ref(`activity-chats/${activityId}`).remove();
 }
+
+
