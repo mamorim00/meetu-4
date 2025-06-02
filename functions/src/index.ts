@@ -14,43 +14,52 @@ import { getDatabase } from "firebase-admin/database";
 // 1) Import the v2 “onValueCreated” trigger, plus Firestore + RTDB Admin SDKs
 import { onValueCreated } from "firebase-functions/v2/database";
 import * as admin from "firebase-admin";
-
-// 2) Initialize the Admin SDK exactly once
+// ────────────────────────────────────────────────────────────────────────────
+// Initialize the Admin SDK exactly once
+// ────────────────────────────────────────────────────────────────────────────
 const serviceAccount = require("../serviceAccountKey.json");
+const PROJECT_ID = "meetudatabutton-default";
+
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
+  projectId: PROJECT_ID,
   databaseURL: "https://meetudatabutton-default-rtdb.europe-west1.firebasedatabase.app"
 });
 
-// 3) Grab Firestore + Realtime Database references
-const db = getFirestore();         // Firestore client
-const rtdb = getDatabase();        // Realtime Database client
+// ────────────────────────────────────────────────────────────────────────────
+// Grab Firestore + Realtime Database references
+// ────────────────────────────────────────────────────────────────────────────
+const db = getFirestore();   // Firestore client
+const rtdb = getDatabase();  // Realtime Database client
 
-// 4) Cloud Function: sendChatNotification
-//    This runs “onValueCreated” under:
+// ────────────────────────────────────────────────────────────────────────────
+// Cloud Function: sendChatNotification
+//
+// Listens for new children under:
 //    /chat-messages/{activityId}/{messageId}
-//    whenever a new message is pushed.
+// and sends an FCM multicast to all other participants.
+// ────────────────────────────────────────────────────────────────────────────
 export const sendChatNotification = onValueCreated(
   {
     // a) RTDB path to watch
     ref: "/chat-messages/{activityId}/{messageId}",
-    // b) RTDB instance ID (before “.firebaseio.com”)
+    // b) RTDB instance ID (the part before “.firebaseio.com”)
     instance: "meetudatabutton-default-rtdb",
-    // c) Region for your function
+    // c) Region for this function
     region: "europe-west1",
   },
   async (event) => {
     // 4.1) Extract path params and snapshot
-    const activityId = event.params.activityId;        // {activityId}
-    const messageSnapshot = event.data;                // DataSnapshot
-    const messageData = messageSnapshot.val();         // { senderId, senderName?, text?, ... }
+    const activityId = event.params.activityId;         // {activityId}
+    const messageSnapshot = event.data;                 // DataSnapshot
+    const messageData = messageSnapshot.val();          // { senderId, senderName?, text?, ... }
 
     console.log(
       `📥 New RTDB child under /chat-messages/${activityId}/${messageSnapshot.key}`,
       messageData
     );
 
-    // 4.2) Guard: must have “text” as a non-empty string
+    // 4.2) Guard: ensure text is a non-empty string
     if (!messageData) {
       console.log("⚠️ No data in messageSnapshot; exiting.");
       return;
@@ -146,8 +155,7 @@ export const sendChatNotification = onValueCreated(
     const truncatedText = text.length > 80 ? text.substring(0, 77) + "…" : text;
     console.log("ℹ️ Truncated notification body:", truncatedText);
 
-    // 4.9) Create the FCM payload (title = senderName, body = truncatedText)
-    //     Note: we’ll pull notification and data into sendMulticast().
+    // 4.9) Prepare notification + data payload for sendMulticast()
     const payloadNotification = {
       title: senderName,
       body: truncatedText,
@@ -162,7 +170,7 @@ export const sendChatNotification = onValueCreated(
       data: payloadData,
     });
 
-    // 4.10) Send a multicast FCM message (replacing deprecated sendToDevice)
+    // 4.10) Send a multicast FCM message (HTTP v1)
     try {
       const multicastResponse = await admin.messaging().sendMulticast({
         tokens: tokens,
@@ -175,7 +183,7 @@ export const sendChatNotification = onValueCreated(
         {
           successCount: multicastResponse.successCount,
           failureCount: multicastResponse.failureCount,
-          // You can inspect multicastResponse.responses for per‐token results if needed
+          // Optionally inspect multicastResponse.responses for per-token errors
         }
       );
     } catch (err) {
@@ -183,7 +191,6 @@ export const sendChatNotification = onValueCreated(
     }
   }
 );
-
 
 
 
