@@ -1,49 +1,70 @@
-import { onDocumentUpdated, onDocumentCreated, onDocumentDeleted  } from 'firebase-functions/v2/firestore';
-import { initializeApp } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
-import { getDatabase } from 'firebase-admin/database';
-import { onSchedule } from 'firebase-functions/v2/scheduler';
+// ── index.ts (or index.js) ──
+
+// 1) Firestore triggers
+import { onDocumentUpdated, onDocumentCreated, onDocumentDeleted } from "firebase-functions/v2/firestore";
+
+// 2) Realtime Database trigger
 import { onValueCreated } from "firebase-functions/v2/database";
+
+// 3) Scheduled triggers
+import { onSchedule } from "firebase-functions/v2/scheduler";
+
+// 4) Firebase-Admin imports
+//    We will use a single admin.initializeApp(...) call instead of mixing modular vs. namespaced.
 import * as admin from "firebase-admin";
+import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
+import { getDatabase } from "firebase-admin/database";
 
+// ────────────────────────────────────────────────────────────────────────────
+// ── Initialize the entire Admin SDK exactly once, for Firestore, RTDB, Messaging, etc.
+// ────────────────────────────────────────────────────────────────────────────
+admin.initializeApp({
+  projectId: "meetudatabutton",
+  // If you need a specific service account key locally, you could add:
+  // credential: admin.credential.applicationDefault(),
+});
 
-
-// Initialize the Admin SDK
-initializeApp();
-
-// Explicitly grab a Firestore client
+// Now grab Firestore and RTDB clients from Admin:
 const db = getFirestore();
 const rtdb = getDatabase();
+
+
+// ────────────────────────────────────────────────────────────────────────────
+// ── 1) sendChatNotification: fires whenever a new child is created under /chat-messages/{activityId}/{messageId}
+// ────────────────────────────────────────────────────────────────────────────
 export const sendChatNotification = onValueCreated(
   {
-    // we push new messages under: /chat-messages/{activityId}/{messageId}
+    // We push new messages under: /chat-messages/{activityId}/{messageId}
     ref: "/chat-messages/{activityId}/{messageId}",
-    instance: "meetudatabutton-default-rtdb",  // ✅ Your RTDB instance ID
-    region: "europe-west1",    
+    instance: "meetudatabutton-default-rtdb",  // Your RTDB instance ID
+    region: "europe-west1",
   },
   async (event) => {
-    
     const activityId = event.params.activityId;
     const messageSnapshot = event.data;
     const messageData = messageSnapshot.val();
 
-    // Log the snapshot key and raw data for the new message
-    console.log(`📥 New message under activityId=${activityId}. messageId=${messageSnapshot.key}`, {
-      messageData,
-    });
+    console.log(
+      `📥 New message under activityId=${activityId}, messageId=${messageSnapshot.key}`,
+      { messageData }
+    );
 
     if (!messageData) {
       console.log("⚠️ No data in new message snapshot; exiting.");
       return;
     }
 
-    // Log individual fields from messageData (if they exist)
+    // Extract senderId, text, and senderName
     const senderId = messageData.senderId as string;
     const text = messageData.text as string;
     const senderName = (messageData.senderName as string) || "Someone";
-    console.log("ℹ️ Parsed messageData fields", { senderId, senderName, textLength: text?.length });
+    console.log("ℹ️ Parsed messageData fields", {
+      senderId,
+      senderName,
+      textLength: text?.length,
+    });
 
-    // Look up the corresponding Firestore "activity" document so we can fetch its participants
+    // 1️⃣ Fetch the corresponding Firestore activity doc, so we can read its participantIds
     const activityDocRef = db.collection("activities").doc(activityId);
     console.log(`🔍 Fetching Firestore document for activities/${activityId}`);
     let activitySnap;
@@ -62,9 +83,9 @@ export const sendChatNotification = onValueCreated(
     const activityData = activitySnap.data()!;
     console.log("✅ Fetched activityData", activityData);
 
+    // Ensure participantIds is an array
     const participantIds = (activityData.participantIds as string[]) || [];
     console.log(`ℹ️ participantIds from activity ${activityId}:`, participantIds);
-
     if (!Array.isArray(participantIds) || participantIds.length === 0) {
       console.log(
         `⚠️ "participantIds" array missing or empty in activities/${activityId}. Exiting.`
@@ -72,7 +93,7 @@ export const sendChatNotification = onValueCreated(
       return;
     }
 
-    // Notify everyone except the sender
+    // 2️⃣ Notify everyone except the sender
     const recipientUids = participantIds.filter((uid) => uid !== senderId);
     console.log("ℹ️ Computed recipientUids (excluding sender):", recipientUids);
     if (recipientUids.length === 0) {
@@ -80,10 +101,10 @@ export const sendChatNotification = onValueCreated(
       return;
     }
 
+    // 3️⃣ For each recipient UID, fetch their FCM token from /userProfiles/{uid}
     const tokens: string[] = [];
     const usersCollection = db.collection("userProfiles");
 
-    // Fetch each recipient’s FCM token
     await Promise.all(
       recipientUids.map(async (uid) => {
         console.log(`🔍 Fetching userProfiles/${uid}`);
@@ -113,10 +134,11 @@ export const sendChatNotification = onValueCreated(
       return;
     }
 
-    // Truncate long messages
+    // 4️⃣ Truncate the message body if too long
     const truncatedText = text.length > 80 ? text.substring(0, 77) + "…" : text;
     console.log("ℹ️ Truncated notification body:", truncatedText);
 
+    // 5️⃣ Build the FCM payload
     const payload: admin.messaging.MessagingPayload = {
       notification: {
         title: senderName,
@@ -129,16 +151,14 @@ export const sendChatNotification = onValueCreated(
     };
     console.log("ℹ️ Prepared FCM payload:", payload);
 
+    // 6️⃣ Actually send the notification to each device token
     try {
       const response = await admin.messaging().sendToDevice(tokens, payload);
-      console.log(
-        `✅ Notifications sent for activityId=${activityId}.`,
-        {
-          successes: response.successCount,
-          failures: response.failureCount,
-          results: response.results,
-        }
-      );
+      console.log(`✅ Notifications sent for activityId=${activityId}.`, {
+        successes: response.successCount,
+        failures: response.failureCount,
+        results: response.results,
+      });
     } catch (error) {
       console.error("❌ Error sending FCM notifications:", error);
     }
@@ -146,13 +166,15 @@ export const sendChatNotification = onValueCreated(
 );
 
 
-// When a user is created or updated, add a lowercase version of their display name
-export const onUserCreatedOrUpdated = onDocumentUpdated('users/{userId}', async (event) => {
+// ────────────────────────────────────────────────────────────────────────────
+// ── 2) onUserCreatedOrUpdated: lowercases displayName whenever a user document is updated
+// ────────────────────────────────────────────────────────────────────────────
+export const onUserCreatedOrUpdated = onDocumentUpdated("users/{userId}", async (event) => {
   const after = event.data?.after?.data();
   const before = event.data?.before?.data();
 
   if (!after) {
-    console.warn('Missing after data in user update');
+    console.warn("Missing after data in user update");
     return;
   }
 
@@ -171,7 +193,7 @@ export const onUserCreatedOrUpdated = onDocumentUpdated('users/{userId}', async 
   }
 });
 
-export const onUserCreated = onDocumentCreated('users/{userId}', async (event) => {
+export const onUserCreated = onDocumentCreated("users/{userId}", async (event) => {
   const data = event.data?.data();
   if (!data?.displayName) {
     console.warn(`User ${event.params.userId} created without a displayName`);
@@ -186,13 +208,13 @@ export const onUserCreated = onDocumentCreated('users/{userId}', async (event) =
 
   console.log(`Created displayName_lowercase for user ${event.params.userId}`);
 });
-import { Timestamp } from 'firebase-admin/firestore';
 
 
-// ——————————————————————————————————
-// 1) When an activity is created:
-export const onActivityCreated = onDocumentCreated('activities/{activityId}', async (event) => {
-  const activity   = event.data?.data();
+// ────────────────────────────────────────────────────────────────────────────
+// ── 3) onActivityCreated: initialize RTDB indices and set defaults on Firestore activity documents
+// ────────────────────────────────────────────────────────────────────────────
+export const onActivityCreated = onDocumentCreated("activities/{activityId}", async (event) => {
+  const activity = event.data?.data();
   const { activityId } = event.params;
   const tsMillis = Date.now();
   const tsFire = Timestamp.fromMillis(tsMillis);
@@ -220,17 +242,16 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
           name: ownerName,
         });
 
-
-  // 1a) Add to /user-chats/{ownerId}/{activityId}
+      // 1a) Add to /user-chats/{ownerId}/{activityId}
       await rtdb.ref(`user-chats/${ownerId}/${activityId}`).set(true);
 
       // 1️⃣a Push “Chat created…” system message
       await rtdb.ref(`chat-messages/${activityId}`).push({
-        senderId: 'system',
-        senderName: 'System',
-        text: 'Chat created. Welcome! Coordinate with participants here.',
+        senderId: "system",
+        senderName: "System",
+        text: "Chat created. Welcome! Coordinate with participants here.",
         timestamp: Date.now(),
-        type: 'system',
+        type: "system",
       });
 
       console.log(
@@ -240,12 +261,12 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
       console.warn(`onActivityCreated: No createdBy.userId for ${activityId}`);
     }
 
-  // 2️⃣ Add lowercase title
-  if (typeof activity.title === "string") {
-    const titleLower = activity.title.toLowerCase();
-    await db.doc(`activities/${activityId}`).update({ title_lowercase: titleLower });
-    console.log(`Added title_lowercase="${titleLower}" to activity ${activityId}`);
-  }
+    // 2️⃣ Add lowercase title
+    if (typeof activity.title === "string") {
+      const titleLower = activity.title.toLowerCase();
+      await db.doc(`activities/${activityId}`).update({ title_lowercase: titleLower });
+      console.log(`Added title_lowercase="${titleLower}" to activity ${activityId}`);
+    }
 
     // 3️⃣ Set initial archived flag to false
     await db.doc(`activities/${activityId}`).update({ archived: false });
@@ -254,90 +275,90 @@ export const onActivityCreated = onDocumentCreated('activities/{activityId}', as
     console.error(`onActivityCreated [${activityId}] failed:`, err);
     throw err; // so the error surfaces in Cloud Functions logs
   }
-   // 4) **CRITICAL**: set lastMessageTimestamp on your Firestore doc
-   await db.doc(`activities/${activityId}`).update({
+
+  // 4) **CRITICAL**: set lastMessageTimestamp on your Firestore doc
+  await db.doc(`activities/${activityId}`).update({
     lastMessageTimestamp: tsFire,
-    title_lowercase:      (activity.title || '').toLowerCase(),
-    archived:             false,
+    title_lowercase: (activity.title || "").toLowerCase(),
+    archived: false,
   });
-  
 });
 
-export const onParticipantAdded = onDocumentUpdated(
-  'activities/{activityId}',
-  async (event) => {
-    const { activityId } = event.params;
 
-    const before = event.data?.before?.data();
-    const after  = event.data?.after?.data();
-    if (!before || !after) {
-      console.warn(`onParticipantAdded: missing before/after for ${activityId}`);
-      return;
-    }
+// ────────────────────────────────────────────────────────────────────────────
+// ── 4) onParticipantAdded: when someone is added to activities/{activityId}.participantIds
+// ────────────────────────────────────────────────────────────────────────────
+export const onParticipantAdded = onDocumentUpdated("activities/{activityId}", async (event) => {
+  const { activityId } = event.params;
 
-    const beforeIds = before.participantIds as string[] || [];
-    const afterIds  = after.participantIds  as string[] || [];
+  const before = event.data?.before?.data();
+  const after = event.data?.after?.data();
+  if (!before || !after) {
+    console.warn(`onParticipantAdded: missing before/after for ${activityId}`);
+    return;
+  }
 
-    // Compute newly added user IDs
-    const newlyAdded = afterIds.filter((id: string) => !beforeIds.includes(id));
+  const beforeIds = (before.participantIds as string[]) || [];
+  const afterIds = (after.participantIds as string[]) || [];
 
-    for (const userId of newlyAdded) {
-      try {
-        console.log('👤 Detected new participant:', userId, 'in activity', activityId);
+  // Compute newly added user IDs
+  const newlyAdded = afterIds.filter((id: string) => !beforeIds.includes(id));
 
-        const userSnap  = await db.doc(`users/${userId}`).get();
-        const userData  = userSnap.exists ? userSnap.data()! : {};
-        const displayName = userData.displayName || userData.name || null;
+  for (const userId of newlyAdded) {
+    try {
+      console.log("👤 Detected new participant:", userId, "in activity", activityId);
 
-        // 1️⃣ Add to RTDB members list
-        await rtdb
-          .ref(`activity-chats/${activityId}/members/${userId}`)
-          .set({
-            joinedAt: Date.now(),
-            name:     displayName,
-          });
+      const userSnap = await db.doc(`users/${userId}`).get();
+      const userData = userSnap.exists ? userSnap.data()! : {};
+      const displayName = userData.displayName || userData.name || null;
 
-        // 2️⃣ Maintain per-user index
-        await rtdb
-          .ref(`user-chats/${userId}/${activityId}`)
-          .set(true);
+      // 1️⃣ Add to RTDB members list
+      await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).set({
+        joinedAt: Date.now(),
+        name: displayName,
+      });
 
-        // 3️⃣ Send “X has joined” system message
-        await rtdb
-          .ref(`chat-messages/${activityId}`)
-          .push({
-            senderId:   'system',
-            senderName: 'System',
-            text:       `${displayName || 'A participant'} has joined the chat.`,
-            timestamp:  Date.now(),
-            type:       'system',
-          });
+      // 2️⃣ Maintain per-user index
+      await rtdb.ref(`user-chats/${userId}/${activityId}`).set(true);
 
-        console.log(`✅ Participant ${userId} indexed and welcome message sent for chat ${activityId}`);
-      } catch (err) {
-        console.error(`❌ Failed to process new participant ${userId} for chat ${activityId}:`, err);
-      }
+      // 3️⃣ Send “X has joined” system message
+      await rtdb.ref(`chat-messages/${activityId}`).push({
+        senderId: "system",
+        senderName: "System",
+        text: `${displayName || "A participant"} has joined the chat.`,
+        timestamp: Date.now(),
+        type: "system",
+      });
+
+      console.log(
+        `✅ Participant ${userId} indexed and welcome message sent for chat ${activityId}`
+      );
+    } catch (err) {
+      console.error(`❌ Failed to process new participant ${userId} for chat ${activityId}:`, err);
     }
   }
-);
+});
 
 
-// 4) Scheduled function: archive past activities once a day
-export const archivePastActivities = onSchedule('every day 00:00', async () => {
+// ────────────────────────────────────────────────────────────────────────────
+// ── 5) archivePastActivities: run every day at midnight to archive old activities
+// ────────────────────────────────────────────────────────────────────────────
+export const archivePastActivities = onSchedule("every day 00:00", async () => {
   const now = new Date();
 
-  const snapshot = await db.collection('activities')
-    .where('archived', '==', false)
-    .where('dateTime', '<', now)
+  const snapshot = await db
+    .collection("activities")
+    .where("archived", "==", false)
+    .where("dateTime", "<", now)
     .get();
 
   if (snapshot.empty) {
-    console.log('No past activities to archive.');
+    console.log("No past activities to archive.");
     return;
   }
 
   const batch = db.batch();
-  snapshot.docs.forEach(doc => {
+  snapshot.docs.forEach((doc) => {
     batch.update(doc.ref, { archived: true });
     console.log(`Archiving activity ${doc.id}`);
   });
@@ -347,38 +368,31 @@ export const archivePastActivities = onSchedule('every day 00:00', async () => {
 });
 
 
-
-
-// ——————————————————————————————————
-// 3) When someone leaves (participant subcollection deleted):
+// ────────────────────────────────────────────────────────────────────────────
+// ── 6) onParticipantRemoved: fires when a participant subdocument is deleted
+// ────────────────────────────────────────────────────────────────────────────
 export const onParticipantRemoved = onDocumentDeleted(
-  'activities/{activityId}/participants/{userId}',
+  "activities/{activityId}/participants/{userId}",
   async (event) => {
     const { activityId, userId } = event.params;
-    const oldData     = event.data?.data() || {};
-    const displayName = oldData.displayName || 'A participant';
+    const oldData = event.data?.data() || {};
+    const displayName = oldData.displayName || "A participant";
 
     try {
       // 3️⃣a Push “X has left…” system message
-      await rtdb
-        .ref(`chat-messages/${activityId}`)
-        .push({
-          senderId:   'system',
-          senderName: 'System',
-          text:       `${displayName} has left the chat.`,
-          timestamp:  Date.now(),
-          type:       'system',
-        });
+      await rtdb.ref(`chat-messages/${activityId}`).push({
+        senderId: "system",
+        senderName: "System",
+        text: `${displayName} has left the chat.`,
+        timestamp: Date.now(),
+        type: "system",
+      });
 
       // 3️⃣b Remove from RTDB members
-      await rtdb
-        .ref(`activity-chats/${activityId}/members/${userId}`)
-        .remove();
+      await rtdb.ref(`activity-chats/${activityId}/members/${userId}`).remove();
 
       // 3️⃣c Remove from per-user index
-      await rtdb
-        .ref(`user-chats/${userId}/${activityId}`)
-        .remove();
+      await rtdb.ref(`user-chats/${userId}/${activityId}`).remove();
 
       console.log(
         `✅ Participant ${userId} removed from members, index cleared, and leave message sent for chat ${activityId}`
@@ -393,25 +407,26 @@ export const onParticipantRemoved = onDocumentDeleted(
 );
 
 
-
-
+// ────────────────────────────────────────────────────────────────────────────
+// ── 7) onFriendRequestAccepted: when a friendRequests/{requestId} flips to “accepted”
+// ────────────────────────────────────────────────────────────────────────────
 export const onFriendRequestAccepted = onDocumentUpdated(
-  'friendRequests/{requestId}',
+  "friendRequests/{requestId}",
   async (event) => {
     const beforeData = event.data?.before?.data();
-    const afterData  = event.data?.after?.data();
+    const afterData = event.data?.after?.data();
 
     if (!beforeData || !afterData) {
-      console.warn('Missing before or after data on friendRequests update');
+      console.warn("Missing before or after data on friendRequests update");
       return;
     }
 
     // Only proceed if status flipped pending -> accepted
-    if (beforeData.status === 'pending' && afterData.status === 'accepted') {
+    if (beforeData.status === "pending" && afterData.status === "accepted") {
       const { senderId, receiverId } = afterData;
-      const profiles = db.collection('userProfiles');
+      const profiles = db.collection("userProfiles");
 
-      // Update both profiles in parallel, using the new FieldValue import
+      // Update both profiles in parallel, using FieldValue.arrayUnion
       await Promise.all([
         profiles.doc(senderId).update({
           friends: FieldValue.arrayUnion(receiverId),
@@ -426,12 +441,16 @@ export const onFriendRequestAccepted = onDocumentUpdated(
   }
 );
 
-export const cleanupInactiveChats = onSchedule('every day 01:00', async () => {
+
+// ────────────────────────────────────────────────────────────────────────────
+// ── 8) cleanupInactiveChats: daily cleanup for old or deleted chats
+// ────────────────────────────────────────────────────────────────────────────
+export const cleanupInactiveChats = onSchedule("every day 01:00", async () => {
   const fiveDaysAgo = Date.now() - 5 * 24 * 60 * 60 * 1000;
 
-  const chatRefs = await rtdb.ref('activity-chats').get();
+  const chatRefs = await rtdb.ref("activity-chats").get();
   if (!chatRefs.exists()) {
-    console.log('No chats to check.');
+    console.log("No chats to check.");
     return;
   }
 
@@ -448,7 +467,8 @@ export const cleanupInactiveChats = onSchedule('every day 01:00', async () => {
         deletedCount++;
       } else {
         const activityData = activityDoc.data();
-        const activityDate = activityData?.dateTime?.toMillis?.() || new Date(activityData?.dateTime).getTime();
+        const activityDate =
+          activityData?.dateTime?.toMillis?.() || new Date(activityData?.dateTime).getTime();
 
         if (activityDate && activityDate < fiveDaysAgo) {
           console.log(`Activity ${activityId} is older than 5 days. Removing chat.`);
