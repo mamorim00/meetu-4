@@ -1,9 +1,8 @@
 // ── frontend/public/firebase-messaging-sw.js ──
 
-// 1) Import the “compat” snippets for Firebase App and Messaging:
-importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js');
-
+// public/firebase-messaging-sw.js
+import { initializeApp } from 'firebase/app';
+import { getMessaging } from 'firebase/messaging/sw'; // Import from 'sw' for service worker
 
 
 // 2) Initialize Firebase in the service worker. 
@@ -19,18 +18,36 @@ firebase.initializeApp({
     measurementId: "G-VZCFSE58NL"
 });
 
-// 3) Retrieve an instance of Firebase Messaging so that it can handle background messages:
-const messaging = firebase.messaging();
+const app = initializeApp(firebaseConfig);
+const messaging = getMessaging(app);
 
-// 4) This callback is invoked when your web app receives a push while the page is in the background or closed:
+// Handle background messages
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Received background message ', payload);
-  const notificationTitle = payload.notification?.title || 'New Notification';
+
+  const notificationTitle = payload.notification.title;
   const notificationOptions = {
-    body: payload.notification?.body,
-    // icon: '/logo192.png', // optional
-    data: payload.data,      // so you can handle clicks if you want
+    body: payload.notification.body,
+    icon: '/firebase-logo.png', // Path to your notification icon
+    data: payload.data // Contains activityId from your Cloud Function
   };
 
+  // Show the notification
   self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+// Handle notification click (when user taps the notification in the browser)
+self.addEventListener('notificationclick', (event) => {
+  console.log('[firebase-messaging-sw.js] Notification clicked:', event);
+  event.notification.close(); // Close the notification
+
+  const activityId = event.notification.data.activityId;
+  if (activityId) {
+    // Open the relevant chat page. Adjust this URL to match your app's routing.
+    const urlToOpen = `/chats/${activityId}`;
+    event.waitUntil(clients.openWindow(urlToOpen));
+  } else {
+    // If no specific chat, open the main app
+    event.waitUntil(clients.openWindow('/'));
+  }
 });

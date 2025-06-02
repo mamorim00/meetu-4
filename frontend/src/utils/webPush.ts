@@ -6,7 +6,7 @@ import { getToken, onMessage } from 'firebase/messaging';
 import { auth, firestore, messaging } from './firebase';
 
 // Paste your actual Public VAPID Key from Firebase Console → Project Settings → Cloud Messaging
-const VAPID_KEY = 'BDOUGWZp14RuvFVQOZwoyWcH09eugymVLIYGSHMRmwkYYSWG7hzk2opKkU858BQHwPbp1of0qYPJvaqyf6pTQ_g';
+const VAPID_KEY = 'BDafrv-iUV8yfVS1NbeG4COwzCEA7FqkVXYsENEQ5w2kJrA90U-PF5iIsZ4a4PtV6e7seQwAcmop_sDF7xjRhjk';
 
 export function registerWebPush() {
   // 1) When a user logs in, register for Web Push:

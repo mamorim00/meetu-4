@@ -27,6 +27,16 @@ import { initializeApp } from 'firebase-admin/app';
 // ────────────────────────────────────────────────────────────────────────────
 initializeApp();
 
+//var admin = require("firebase-admin");
+
+var serviceAccount = require("path/to/serviceAccountKey.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: "https://meetudatabutton-default-rtdb.europe-west1.firebasedatabase.app"
+});
+
+
 // Now grab Firestore and RTDB clients from Admin:
 const db = getFirestore();
 const rtdb = getDatabase();
@@ -53,6 +63,10 @@ export const sendChatNotification = onValueCreated(
 
     if (!messageData) {
       console.log('⚠️ No data in new message snapshot; exiting.');
+      return;
+    }
+    if (typeof messageData.text !== 'string' || messageData.text.trim() === '') {
+      console.log('⚠️ Message text is missing, not a string, or empty. Exiting.');
       return;
     }
 
