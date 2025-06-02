@@ -4,6 +4,7 @@
     "esModuleInterop": true,
     "moduleResolution": "nodenext",
     "noImplicitReturns": true,
+    "resolveJsonModule": true,
     "noUnusedLocals": true,
     "outDir": "lib",
     "sourceMap": true,
@@ -15,3 +16,5 @@
     "src"
   ]
 }
+
+

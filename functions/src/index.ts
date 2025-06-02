@@ -27,7 +27,7 @@ import * as admin from "firebase-admin";
 //    • We point to our serviceAccount key JSON and our RTDB URL.
 //    • After this call, you can use admin.firestore() and admin.database().
 // ────────────────────────────────────────────────────────────────────
-const serviceAccount = require("./serviceAccountKey.json");
+const serviceAccount = require("../serviceAccountKey.json");
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   databaseURL: "https://meetudatabutton-default-rtdb.europe-west1.firebasedatabase.app"
