@@ -17,6 +17,7 @@ const OtherUserProfile = lazy(() => import("./pages/OtherUserProfile.tsx"));
 const MyActivities = lazy(() => import("./pages/MyActivities.tsx"));
 const EditActivity = lazy(() => import("./pages/EditActivity.tsx"));
 
+
 // Utility function to wrap components in Suspense
 const withSuspense = (element: React.ReactNode) => (
   <Suspense fallback={<div>Loading...</div>}>{element}</Suspense>

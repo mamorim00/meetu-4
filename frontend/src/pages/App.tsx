@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "app";
 import { toast } from "sonner";
@@ -98,10 +98,13 @@ export default function Home() {
           </div>
         </div>
       </main>
-      
-      <footer className="bg-muted py-6 px-4 border-t">
+     {/* --- MODIFIED FOOTER --- */}
+     <footer className="bg-muted py-6 px-4 border-t">
         <div className="max-w-6xl mx-auto text-center text-sm text-muted-foreground">
-          <p>© 2025 Meetu. All rights reserved.</p>
+          <p className="mb-2">© 2025 Meetu. All rights reserved.</p>
+          <Link to="/privacypolicy" className="underline hover:text-primary">
+            Privacy Policy
+          </Link>
         </div>
       </footer>
     </div>

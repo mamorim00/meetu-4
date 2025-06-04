@@ -8,9 +8,27 @@ export const SuspenseWrapper = ({ children }: { children: ReactNode }) => {
 
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 const SomethingWentWrongPage = lazy(() => import("./pages/SomethingWentWrongPage"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy.tsx")); 
 
 export const router = createBrowserRouter([
+  {
+    path: "/privacy-policy",
+    element: (
+      <SuspenseWrapper>
+        <PrivacyPolicy />
+      </SuspenseWrapper>
+    ),
+  },
+  {
+    path: "/privacypolicy",
+    element: (
+      <SuspenseWrapper>
+        <PrivacyPolicy />
+      </SuspenseWrapper>
+    ),
+  },
   ...userRoutes,
+
   {
     path: "*",
     element: (
@@ -18,6 +36,7 @@ export const router = createBrowserRouter([
         <NotFoundPage />
       </SuspenseWrapper>
     ),
+
     errorElement: (
       <SuspenseWrapper>
         <SomethingWentWrongPage />
