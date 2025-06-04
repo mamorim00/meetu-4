@@ -154,7 +154,7 @@ export const sendChatNotification = onValueCreated(
 // ────────────────────────────────────────────────────────────────────────────
 // ── 2) onUserCreatedOrUpdated: lowercases displayName whenever a user document is updated
 // ────────────────────────────────────────────────────────────────────────────
-export const onUserCreatedOrUpdated = onDocumentUpdated("users/{userId}", async (event) => {
+export const onUserCreatedOrUpdated = onDocumentUpdated("userProfiles/{userId}", async (event) => {
   const after = event.data?.after?.data();
   const before = event.data?.before?.data();
 
@@ -170,7 +170,7 @@ export const onUserCreatedOrUpdated = onDocumentUpdated("users/{userId}", async 
   ) {
     const displayNameLower = after.displayName.toLowerCase();
 
-    await db.doc(`users/${event.params.userId}`).update({
+    await db.doc(`userProfiles/${event.params.userId}`).update({
       displayName_lowercase: displayNameLower,
     });
 
@@ -178,7 +178,7 @@ export const onUserCreatedOrUpdated = onDocumentUpdated("users/{userId}", async 
   }
 });
 
-export const onUserCreated = onDocumentCreated("users/{userId}", async (event) => {
+export const onUserCreated = onDocumentCreated("userProfiles/{userId}", async (event) => {
   const data = event.data?.data();
   if (!data?.displayName) {
     console.warn(`User ${event.params.userId} created without a displayName`);
@@ -187,7 +187,7 @@ export const onUserCreated = onDocumentCreated("users/{userId}", async (event) =
 
   const displayNameLower = data.displayName.toLowerCase();
 
-  await db.doc(`users/${event.params.userId}`).update({
+  await db.doc(`userProfiles/${event.params.userId}`).update({
     displayName_lowercase: displayNameLower,
   });
 
@@ -293,7 +293,7 @@ export const onParticipantAdded = onDocumentUpdated("activities/{activityId}", a
     try {
       console.log("👤 Detected new participant:", userId, "in activity", activityId);
 
-      const userSnap = await db.doc(`users/${userId}`).get();
+      const userSnap = await db.doc(`userProfiles/${userId}`).get();
       const userData = userSnap.exists ? userSnap.data()! : {};
       const displayName = userData.displayName || userData.name || null;
 
