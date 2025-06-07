@@ -478,72 +478,121 @@ async function deleteChat(activityId: string) {
   await rtdb.ref(`activity-chats/${activityId}`).remove();
 }
 
+async function removeBlockerFromSharedActivitiesAndChats(blockerId: string, targetId: string) {
+  console.log(`Checking for shared activities between blocker ${blockerId} and target ${targetId}...`);
 
-// ────────────────────────────────────────────────────────────────────────────
-// ── 10) Sync Blocklist Changes (Trigger-based)
-//
-// This function listens for updates on any user's profile.
-// When a user adds or removes someone from their 'blockedUsers' list,
-// this trigger automatically updates the other user's 'blockedBy' list.
-// ────────────────────────────────────────────────────────────────────────────
+  // 1. Find all activities the blocker is currently a part of.
+  const activitiesRef = db.collection("activities");
+  const snapshot = await activitiesRef.where("participantIds", "array-contains", blockerId).get();
+
+  if (snapshot.empty) {
+      console.log(`Blocker ${blockerId} is not in any activities.`);
+      return;
+  }
+
+  const batch = db.batch();
+  let sharedActivitiesFound = 0;
+
+  // 2. Filter these activities to find the ones shared with the target.
+  for (const doc of snapshot.docs) {
+      const activity = doc.data();
+      const activityId = doc.id;
+
+      // A "shared activity" is one where the target is either the creator or another participant.
+      const isShared = (activity.createdBy.userId === targetId) || (activity.participantIds.includes(targetId));
+
+      if (isShared) {
+          sharedActivitiesFound++;
+          console.log(`Found shared activity: ${activityId}. Removing blocker ${blockerId}.`);
+          
+          // 3a. Remove the blocker from the activity's participants list in Firestore.
+          batch.update(doc.ref, {
+              participantIds: FieldValue.arrayRemove(blockerId)
+          });
+
+          // 3b. Remove the blocker from the corresponding chat in Realtime Database.
+          await rtdb.ref(`activity-chats/${activityId}/members/${blockerId}`).remove();
+          await rtdb.ref(`user-chats/${blockerId}/${activityId}`).remove();
+
+          // 3c. (Optional) Post a "User has left" system message to the chat.
+          await rtdb.ref(`chat-messages/${activityId}`).push({
+              senderId: "system",
+              senderName: "System",
+              text: `${activity.createdBy.displayName || "A participant"} has left the chat.`, // Use a generic name
+              timestamp: Date.now(),
+              type: "system",
+          });
+      }
+  }
+
+  // 4. Commit all the Firestore updates at once.
+  if (sharedActivitiesFound > 0) {
+      await batch.commit();
+      console.log(`✅ Successfully removed blocker ${blockerId} from ${sharedActivitiesFound} shared activities.`);
+  } else {
+      console.log(`No shared activities found between ${blockerId} and ${targetId}.`);
+  }
+}
+
+
+/**
+* UPDATED FUNCTION
+* Listens for updates on a user's profile. When a user blocks someone,
+* it now also triggers the cleanup of shared activities.
+*/
 export const syncBlocklistChanges = onDocumentUpdated("userProfiles/{userId}", async (event) => {
   const beforeData = event.data?.before.data();
   const afterData = event.data?.after.data();
-  
-  // The user ID of the person who made the change
-  const blockerId = event.params.userId; 
+  const blockerId = event.params.userId;
 
   if (!beforeData || !afterData) {
-    console.log("No data change to process.");
-    return;
+      console.log("No data change to process.");
+      return;
   }
 
-  // Get the lists before and after, defaulting to empty arrays if null
   const beforeBlockedIds = new Set<string>(beforeData.blockedUsers || []);
   const afterBlockedIds = new Set<string>(afterData.blockedUsers || []);
 
-  // --- Determine who was just BLOCKED ---
   const newlyBlocked = [...afterBlockedIds].filter(id => !beforeBlockedIds.has(id));
-
-  // --- Determine who was just UNBLOCKED ---
   const newlyUnblocked = [...beforeBlockedIds].filter(id => !afterBlockedIds.has(id));
 
-  // Create a list of promises to run in parallel
   const promises: Promise<any>[] = [];
 
   // Process newly blocked users
   if (newlyBlocked.length > 0) {
-    console.log(`User ${blockerId} blocked:`, newlyBlocked);
-    for (const targetId of newlyBlocked) {
-      const targetUserRef = db.collection("userProfiles").doc(targetId);
-      // Add the blocker's ID to the target's 'blockedBy' list
-      const blockPromise = targetUserRef.update({
-        blockedBy: FieldValue.arrayUnion(blockerId)
-      });
-      promises.push(blockPromise);
-    }
+      console.log(`User ${blockerId} blocked:`, newlyBlocked);
+      for (const targetId of newlyBlocked) {
+          const targetUserRef = db.collection("userProfiles").doc(targetId);
+          
+          // Promise 1: Update the target's 'blockedBy' list.
+          promises.push(targetUserRef.update({
+              blockedBy: FieldValue.arrayUnion(blockerId)
+          }));
+          
+          // --- NEW ---
+          // Promise 2: Remove the blocker from any activities/chats shared with the target.
+          promises.push(removeBlockerFromSharedActivitiesAndChats(blockerId, targetId));
+      }
   }
 
   // Process newly unblocked users
   if (newlyUnblocked.length > 0) {
-    console.log(`User ${blockerId} unblocked:`, newlyUnblocked);
-    for (const targetId of newlyUnblocked) {
-      const targetUserRef = db.collection("userProfiles").doc(targetId);
-      // Remove the blocker's ID from the target's 'blockedBy' list
-      const unblockPromise = targetUserRef.update({
-        blockedBy: FieldValue.arrayRemove(blockerId)
-      });
-      promises.push(unblockPromise);
-    }
+      console.log(`User ${blockerId} unblocked:`, newlyUnblocked);
+      for (const targetId of newlyUnblocked) {
+          const targetUserRef = db.collection("userProfiles").doc(targetId);
+          promises.push(targetUserRef.update({
+              blockedBy: FieldValue.arrayRemove(blockerId)
+          }));
+      }
   }
 
   // Execute all the updates
   if (promises.length > 0) {
-    try {
-      await Promise.all(promises);
-      console.log(`✅ Successfully synced blocklist changes initiated by ${blockerId}.`);
-    } catch (error) {
-      console.error(`❌ Failed to sync blocklist changes for ${blockerId}:`, error);
-    }
+      try {
+          await Promise.all(promises);
+          console.log(`✅ Successfully synced blocklist changes and actions for ${blockerId}.`);
+      } catch (error) {
+          console.error(`❌ Failed to sync blocklist changes for ${blockerId}:`, error);
+      }
   }
 });
