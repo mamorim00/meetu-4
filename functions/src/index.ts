@@ -324,34 +324,76 @@ export const onParticipantAdded = onDocumentUpdated("activities/{activityId}", a
   }
 });
 
-
 // ────────────────────────────────────────────────────────────────────────────
 // ── 5) archivePastActivities: run every day at midnight to archive old activities
 // ────────────────────────────────────────────────────────────────────────────
 export const archivePastActivities = onSchedule("every day 00:00", async () => {
   const now = new Date();
+  // Define what "old" means for deletion (e.g., activities older than 30 days)
+  const thirtyDaysAgo = new Date(now.setDate(now.getDate() - 30));
 
-  const snapshot = await db
+  const activitiesToArchiveSnapshot = await db
     .collection("activities")
     .where("archived", "==", false)
-    .where("dateTime", "<", now)
+    .where("dateTime", "<", now) // Activities whose date/time has passed
     .get();
 
-  if (snapshot.empty) {
-    console.log("No past activities to archive.");
+  const activitiesToDeleteChatsSnapshot = await db
+    .collection("activities")
+    .where("dateTime", "<", thirtyDaysAgo) // Activities older than 30 days
+    .get();
+
+  if (activitiesToArchiveSnapshot.empty && activitiesToDeleteChatsSnapshot.empty) {
+    console.log("No activities to archive or delete chats for.");
     return;
   }
 
   const batch = db.batch();
-  snapshot.docs.forEach((doc) => {
-    batch.update(doc.ref, { archived: true });
-    console.log(`Archiving activity ${doc.id}`);
+  let archivedCount = 0;
+  let chatDeletedCount = 0;
+  const chatDeletionPromises: Promise<void>[] = [];
+
+  // --- Archive activities ---
+  activitiesToArchiveSnapshot.docs.forEach((doc) => {
+    if (!doc.data().archived) { // Double-check if not already archived
+      batch.update(doc.ref, { archived: true });
+      console.log(`Archiving activity ${doc.id}`);
+      archivedCount++;
+    }
   });
 
-  await batch.commit();
-  console.log(`Archived ${snapshot.size} activities`);
-});
+  // --- Delete chats for very old activities ---
+  activitiesToDeleteChatsSnapshot.docs.forEach((doc) => {
+    const activityId = doc.id;
+    console.log(`Scheduling chat deletion for very old activity ${activityId}`);
+    chatDeletionPromises.push(deleteChat(activityId).then(() => {
+      chatDeletedCount++;
+    }).catch(err => {
+      console.error(`Error deleting chat for activity ${activityId}:`, err);
+    }));
+    // Optionally, you might want to delete the Firestore activity document itself
+    // if you consider it entirely purged after chat deletion.
+    // batch.delete(doc.ref);
+  });
 
+  // Commit Firestore batch operations
+  if (archivedCount > 0) {
+    await batch.commit();
+    console.log(`Archived ${archivedCount} activities in Firestore.`);
+  } else {
+    console.log("No new activities to archive today.");
+  }
+
+  // Wait for all chat deletions to complete
+  if (chatDeletionPromises.length > 0) {
+    await Promise.allSettled(chatDeletionPromises); // Use allSettled to ensure all promises run even if some fail
+    console.log(`Deleted chats for ${chatDeletedCount} old activities in Realtime Database.`);
+  } else {
+    console.log("No old chats to delete today.");
+  }
+
+  console.log("Daily cleanup routine complete.");
+});
 
 // ────────────────────────────────────────────────────────────────────────────
 // ── 6) onParticipantRemoved: fires when a participant subdocument is deleted
