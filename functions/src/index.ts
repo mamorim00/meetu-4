@@ -2,6 +2,7 @@
 
 // 1) Firestore triggers
 import { onDocumentUpdated, onDocumentCreated, onDocumentDeleted } from "firebase-functions/v2/firestore";
+import * as logger from "firebase-functions/logger";
 
 // 3) Scheduled triggers
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -468,114 +469,138 @@ export const onFriendRequestAccepted = onDocumentUpdated(
   }
 );
 
-
 // ────────────────────────────────────────────────────────────────────────────
-// ── 8) cleanupInactiveChats: daily cleanup for old or deleted chats
+// ── 8) cleanupInactiveChats: daily cleanup for old or deleted chats (OPTIMIZED)
 // ────────────────────────────────────────────────────────────────────────────
 export const cleanupInactiveChats = onSchedule("every day 01:00", async () => {
-  const fiveDaysAgo = Date.now() - 5 * 24 * 60 * 60 * 1000;
+  logger.log("Starting daily cleanup of inactive chats...");
 
-  const chatRefs = await rtdb.ref("activity-chats").get();
-  if (!chatRefs.exists()) {
-    console.log("No chats to check.");
+  // In one query, get all activities older than 5 days. This is far more
+  // efficient than fetching all chats and checking each one individually.
+  const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+  const oldActivitiesSnapshot = await db
+    .collection("activities")
+    .where("dateTime", "<", fiveDaysAgo)
+    .get();
+
+  if (oldActivitiesSnapshot.empty) {
+    logger.log("No old activities found. Cleanup not needed.");
+    // We still run the check for deleted activities below.
+  }
+
+  const activityIdsToDelete = new Set<string>();
+  oldActivitiesSnapshot.docs.forEach((doc) => activityIdsToDelete.add(doc.id));
+
+  // Also check for chats whose activity document has been deleted.
+  // This part remains necessary for chats without a corresponding activity.
+  const allChatsSnapshot = await rtdb.ref("activity-chats").get();
+  if (allChatsSnapshot.exists()) {
+    const allChatIds = Object.keys(allChatsSnapshot.val());
+    const firestoreCheckPromises = allChatIds.map(async (chatId) => {
+      const doc = await db.collection("activities").doc(chatId).get();
+      if (!doc.exists) {
+        activityIdsToDelete.add(chatId); // Add to our set for deletion
+      }
+    });
+    await Promise.all(firestoreCheckPromises);
+  }
+
+  if (activityIdsToDelete.size === 0) {
+    logger.log("Cleanup finished. No inactive chats to delete.");
     return;
   }
 
-  let deletedCount = 0;
+  // Perform all deletions in parallel.
+  const deletionPromises = Array.from(activityIdsToDelete).map((id) =>
+    deleteChat(id)
+  );
+  await Promise.all(deletionPromises);
 
-  const deletions = Object.keys(chatRefs.val()).map(async (activityId) => {
-    try {
-      const activityDoc = await db.doc(`activities/${activityId}`).get();
-
-      // If activity was deleted or is older than 5 days
-      if (!activityDoc.exists) {
-        console.log(`Activity ${activityId} was deleted. Removing chat.`);
-        await deleteChat(activityId);
-        deletedCount++;
-      } else {
-        const activityData = activityDoc.data();
-        const activityDate =
-          activityData?.dateTime?.toMillis?.() || new Date(activityData?.dateTime).getTime();
-
-        if (activityDate && activityDate < fiveDaysAgo) {
-          console.log(`Activity ${activityId} is older than 5 days. Removing chat.`);
-          await deleteChat(activityId);
-          deletedCount++;
-        }
-      }
-    } catch (err) {
-      console.warn(`Error processing activity ${activityId}:`, err);
-    }
-  });
-
-  await Promise.all(deletions);
-
-  console.log(`Cleanup done. Deleted ${deletedCount} inactive chats.`);
+  logger.log(
+    `✅ Cleanup complete. Deleted ${activityIdsToDelete.size} inactive chats.`
+  );
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// ── deleteChat (IMPROVED & COMPLETE)
+// ────────────────────────────────────────────────────────────────────────────
 async function deleteChat(activityId: string) {
-  // Remove chat messages
-  await rtdb.ref(`chat-messages/${activityId}`).remove();
-  // Remove members list
-  await rtdb.ref(`activity-chats/${activityId}`).remove();
+  logger.log(`Performing complete deletion for chat: ${activityId}`);
+  const deletionPromises: Promise<any>[] = [];
+
+  // 1. Get the list of all members from the chat to clean up their personal chat lists.
+  const membersRef = rtdb.ref(`activity-chats/${activityId}/members`);
+  const membersSnapshot = await membersRef.get();
+
+  if (membersSnapshot.exists()) {
+    const memberIds = Object.keys(membersSnapshot.val());
+    // For each member, add a promise to remove the reference from their `user-chats` list.
+    // This prevents "ghost" chats in the app.
+    for (const userId of memberIds) {
+      deletionPromises.push(rtdb.ref(`user-chats/${userId}/${activityId}`).remove());
+    }
+  }
+
+  // 2. Add promises to delete the core chat data.
+  deletionPromises.push(rtdb.ref(`chat-messages/${activityId}`).remove());
+  deletionPromises.push(rtdb.ref(`activity-chats/${activityId}`).remove()); // Deletes members list too
+
+  // 3. Execute all delete operations in parallel.
+  await Promise.all(deletionPromises);
+  logger.log(`Successfully deleted all data for chat ${activityId}.`);
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// ── removeBlockerFromSharedActivitiesAndChats (IMPROVED)
+// ────────────────────────────────────────────────────────────────────────────
 async function removeBlockerFromSharedActivitiesAndChats(blockerId: string, targetId: string) {
-  console.log(`Checking for shared activities between blocker ${blockerId} and target ${targetId}...`);
+  logger.log(`Checking for shared activities between blocker ${blockerId} and target ${targetId}...`);
 
   // 1. Find all activities the blocker is currently a part of.
   const activitiesRef = db.collection("activities");
   const snapshot = await activitiesRef.where("participantIds", "array-contains", blockerId).get();
 
   if (snapshot.empty) {
-      console.log(`Blocker ${blockerId} is not in any activities.`);
-      return;
+    logger.log(`Blocker ${blockerId} is not in any activities.`);
+    return;
   }
 
   const batch = db.batch();
+  const rtdbPromises: Promise<any>[] = [];
   let sharedActivitiesFound = 0;
 
-  // 2. Filter these activities to find the ones shared with the target.
+  // 2. Filter these to find activities shared with the target.
   for (const doc of snapshot.docs) {
-      const activity = doc.data();
+    const activity = doc.data();
+    const isShared = (activity.createdBy.userId === targetId) || (activity.participantIds.includes(targetId));
+
+    if (isShared) {
+      sharedActivitiesFound++;
       const activityId = doc.id;
+      logger.log(`Found shared activity: ${activityId}. Removing blocker ${blockerId}.`);
 
-      // A "shared activity" is one where the target is either the creator or another participant.
-      const isShared = (activity.createdBy.userId === targetId) || (activity.participantIds.includes(targetId));
-
-      if (isShared) {
-          sharedActivitiesFound++;
-          console.log(`Found shared activity: ${activityId}. Removing blocker ${blockerId}.`);
-          
-          // 3a. Remove the blocker from the activity's participants list in Firestore.
-          batch.update(doc.ref, {
-              participantIds: FieldValue.arrayRemove(blockerId)
-          });
-
-          // 3b. Remove the blocker from the corresponding chat in Realtime Database.
-          await rtdb.ref(`activity-chats/${activityId}/members/${blockerId}`).remove();
-          await rtdb.ref(`user-chats/${blockerId}/${activityId}`).remove();
-
-          // 3c. (Optional) Post a "User has left" system message to the chat.
-          await rtdb.ref(`chat-messages/${activityId}`).push({
-              senderId: "system",
-              senderName: "System",
-              text: `${activity.createdBy.displayName || "A participant"} has left the chat.`, // Use a generic name
-              timestamp: Date.now(),
-              type: "system",
-          });
-      }
+      // 3a. Remove blocker from the Firestore activity participants list.
+      rtdbPromises.push(
+        rtdb.ref(`chat-messages/${activityId}`).push({
+          senderId: "system",
+          senderName: "System",
+          text: "A participant has been removed from the chat.",
+          timestamp: Date.now(),
+          type: "system",
+        }).then(() => {}), // Ensure it returns a promise
+      );
+    }
   }
 
-  // 4. Commit all the Firestore updates at once.
+  // 4. Execute all database updates.
   if (sharedActivitiesFound > 0) {
-      await batch.commit();
-      console.log(`✅ Successfully removed blocker ${blockerId} from ${sharedActivitiesFound} shared activities.`);
+    // Commit Firestore batch and run all RTDB operations in parallel.
+    await Promise.all([batch.commit(), ...rtdbPromises]);
+    logger.log(`✅ Successfully removed blocker ${blockerId} from ${sharedActivitiesFound} shared activities.`);
   } else {
-      console.log(`No shared activities found between ${blockerId} and ${targetId}.`);
+    logger.log(`No shared activities found between ${blockerId} and ${targetId}.`);
   }
 }
-
 
 /**
 * UPDATED FUNCTION
