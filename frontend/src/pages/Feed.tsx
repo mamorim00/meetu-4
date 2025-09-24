@@ -40,6 +40,7 @@ export type ActivityCategory =
   | "Movies"
   | "Travel"
   | "Music"
+  | "Hangout"
   | "Cooking";
 
 
@@ -79,19 +80,13 @@ export default function Feed() {
     );
     return () => unsub();
   }, [user.uid, friends, showFriendsOnly]); 
-
-  const timeFiltered = useMemo(() => {
-    const now = new Date();
-    return activities.filter(act => {
-      // pick the right Date
-      const when =
-        act.dateTime instanceof Timestamp
-          ? act.dateTime.toDate()
-          : new Date(act.dateTime);
   
+  const timeFiltered = useMemo(() => {
+    return activities.filter(act => {
+      // Check the archived field directly
       return timeFilter === "upcoming"
-        ? when >= now
-        : when < now;
+        ? act.archived === false
+        : act.archived === true;
     });
   }, [activities, timeFilter]);
 
@@ -204,7 +199,7 @@ export default function Feed() {
                 className="w-full"
               >
                 <TabsList className="grid grid-cols-3 md:grid-cols-9 bg-muted/20 rounded-md p-1">
-                  {["All", "Sports", "Dining", "Hiking", "Gaming", "Movies", "Travel", "Music", "Cooking"].map(cat => (
+                  {["All", "Sports", "Dining", "Hiking", "Gaming", "Movies", "Travel", "Music", "Cooking","Hangout"].map(cat => (
                     <TabsTrigger key={cat} value={cat} className="m-1 rounded-full">
                       {cat}
                     </TabsTrigger>

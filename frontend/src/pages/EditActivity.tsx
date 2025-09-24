@@ -15,7 +15,7 @@ import { firestore } from "../utils/firebase";
 
 const CATEGORIES = [
   "Sports", "Dining", "Hiking", "Gaming",
-  "Movies", "Travel", "Music", "Cooking",
+  "Movies", "Travel", "Music", "Cooking", "Hangout"
 ] as const;
 
 export default function EditActivity() {
@@ -59,7 +59,7 @@ export default function EditActivity() {
             ? data.dateTime.toDate().toISOString().slice(0, 16)
             : new Date(data.dateTime).toISOString().slice(0, 16);
 
-        setForm({ ...data, dateTime: dt });
+        setForm({ ...data, dateTime: typeof dt === 'string' ? Timestamp.fromDate(new Date(dt)) : dt });
       } catch (err) {
         console.error(err);
         toast.error("Failed to load activity");
@@ -169,7 +169,7 @@ export default function EditActivity() {
             id="dateTime"
             name="dateTime"
             type="datetime-local"
-            value={form.dateTime as string}
+            value={(form.dateTime as unknown) as string}
             onChange={handleChange}
           />
         </div>
